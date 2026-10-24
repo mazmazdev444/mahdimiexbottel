@@ -13,6 +13,30 @@ export interface MusicDownloadResult {
 }
 
 /**
+ * تشخیص هوشمند نیت دانلود موزیک، لینک‌های اسپاتیفای و ساندکلاد از متن پیام
+ */
+export function extractMusicQuery(text: string): string | null {
+  const t = text.trim();
+  // 1. هرگونه لینک اسپاتیفای (ترک، آلبوم یا لینک کوتاه)
+  const spotifyMatch = t.match(/https?:\/\/(?:open\.)?spotify\.(?:com|link)\/[^\s]+/i);
+  if (spotifyMatch) return spotifyMatch[0];
+
+  // 2. هرگونه لینک ساندکلاد
+  const scMatch = t.match(/https?:\/\/soundcloud\.com\/[^\s]+/i);
+  if (scMatch) return scMatch[0];
+
+  // 3. درخواست‌های فارسی و انگلیسی موزیک
+  // مثل: "دانلود آهنگ شادمهر"، "اهنگ شادمهر"، "موزیک shape of you"، "دانلود اهنگ معین"، "میشه اهنگ فلان رو برام بفرستی"
+  const m = t.match(/^(?:لطفاً\s+|لطفا\s+|میشه\s+)?(?:دانلود\s+)?(?:آهنگ|اهنگ|موزیک|ترانه|موسیقی)\s+(?:از\s+)?(.+)/i);
+  if (m && m[1]) {
+    let q = m[1].replace(/(?:\s+رو\s+(?:برام\s+)?(?:بفرست(?:ی|ید)?|دانلود\s*کن(?:ید)?|پیدا\s*کن|پخش\s*کن))$/i, "");
+    q = q.replace(/(?:\s+(?:برام\s+)?(?:بفرست(?:ی|ید)?|دانلود\s*کن(?:ید)?|میخوام))$/i, "");
+    return q.trim();
+  }
+  return null;
+}
+
+/**
  * دانلود و استخراج فایل صوتی با استفاده از yt-dlp در دایرکتوری موقت /tmp
  */
 export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): Promise<MusicDownloadResult> {
@@ -25,19 +49,40 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
   }
 
   let query = cleanInput;
-  const isUrl = /^https?:\/\//i.test(cleanInput);
-  if (typeof query === "string" && query.includes("spotify.com/track/")) {
+  let detectedTitle: string | undefined;
+  let detectedPerformer: string | undefined;
+
+  const isSpotify = cleanInput.includes("spotify.com") || cleanInput.includes("spotify.link");
+  if (isSpotify) {
     try {
-      const _sRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(query), { signal });
-      const _sData = await _sRes.json();
-      if (_sData && _sData.title) query = "scsearch1:" + _sData.title;
-    } catch {}
+      let resolvedUrl = cleanInput;
+      if (cleanInput.includes("spotify.link")) {
+        const redirectRes = await fetch(cleanInput, { redirect: "follow", signal }).catch(() => null);
+        if (redirectRes?.url) resolvedUrl = redirectRes.url;
+      }
+      const _sRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(resolvedUrl), { signal });
+      if (_sRes.ok) {
+        const _sData = await _sRes.json();
+        if (_sData && _sData.title) {
+          query = _sData.title;
+          detectedTitle = _sData.title;
+          if (_sData.provider_name) detectedPerformer = _sData.provider_name;
+        }
+      }
+    } catch (e: any) {
+      console.warn("Spotify oEmbed resolution warning:", e?.message || e);
+    }
   }
+
   if (signal?.aborted) {
     return { ok: false, error: "عملیات متوقف شد." };
   }
 
-  const target = isUrl ? cleanInput : `scsearch1:${cleanInput}`;
+  const isUrl = /^https?:\/\//i.test(cleanInput);
+  // Spotify streams are DRM-protected, so we search YouTube (ytsearch1) using the resolved track name
+  // Non-Spotify URLs (e.g. SoundCloud, direct audio links) are passed directly
+  // Plain queries (song names) are searched via ytsearch1
+  const target = isUrl && !isSpotify ? cleanInput : `ytsearch1:${query}`;
   const id = `mazmaz_audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const outTemplate = path.join("/tmp", `${id}.%(ext)s`);
 
@@ -56,30 +101,40 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
     } catch {}
   };
 
-  const args = [
-    "yt-dlp",
-    "--no-playlist",
-    "--extractor-args",
-    "youtube:player_client=android",
-    "--max-filesize",
-    "50M",
-    "-x",
-    "--audio-format",
-    "mp3",
-    "--audio-quality",
-    "192K",
-    "--print",
-    "%(title)s<META>%(artist,uploader)s<META>%(duration)s",
-    "--no-simulate",
-    "-o",
-    outTemplate,
-  ];
+  const runYtDlp = async (targetToDownload: string) => {
+    const args = [
+      "yt-dlp",
+      "--no-playlist",
+      "--max-filesize",
+      "50M",
+      "-x",
+      "--audio-format",
+      "mp3",
+      "--audio-quality",
+      "192K",
+      "--print",
+      "%(title)s<META>%(artist,uploader)s<META>%(duration)s",
+      "--no-simulate",
+      "-o",
+      outTemplate,
+    ];
 
-  if (CONFIG.USE_PROXY && CONFIG.PROXY_URL) {
-    args.push("--proxy", CONFIG.PROXY_URL);
-  }
+    if (CONFIG.USE_PROXY && CONFIG.PROXY_URL) {
+      args.push("--proxy", CONFIG.PROXY_URL);
+    }
 
-  args.push(target);
+    args.push(targetToDownload);
+
+    proc = Bun.spawn(args, {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    return { exitCode, stdout, stderr };
+  };
 
   let proc: any = null;
   const onAbort = () => {
@@ -101,20 +156,20 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
       return { ok: false, error: "عملیات متوقف شد." };
     }
 
-    proc = Bun.spawn(args, {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    let downloadExec = await runYtDlp(target);
 
-    const exitCode = await proc.exited;
+    // If YouTube search failed or hit DRM/error, fallback to SoundCloud
+    if (downloadExec.exitCode !== 0 && target.startsWith("ytsearch1:") && !signal?.aborted) {
+      console.warn(`[MUSIC] YouTube search failed for "${query}", trying SoundCloud fallback...`);
+      downloadExec = await runYtDlp(`scsearch1:${query}`);
+    }
 
     if (signal?.aborted) {
       cleanupPartialFiles();
       return { ok: false, error: "عملیات متوقف شد." };
     }
 
-    const stdout = await new Response(proc.stdout).text();
-    const stderr = await new Response(proc.stderr).text();
+    const { exitCode, stdout, stderr } = downloadExec;
 
     if (exitCode !== 0) {
       cleanupPartialFiles();
@@ -222,8 +277,13 @@ export async function sendMusicToTelegram(
       return { ok: false, message: "متوقف شد" };
     }
 
+    const isSpotify = queryOrUrl.includes("spotify.com") || queryOrUrl.includes("spotify.link");
+    const statusText = isSpotify
+      ? "🎵 <i>در حال شناسایی و دریافت آهنگ از اسپاتیفای... ⏳</i>"
+      : "🎵 <i>در حال جستجو و دریافت آهنگ از پایگاه صوتی... ⏳</i>";
+
     if (ctx?.reply) {
-      statusMsg = await ctx.reply("🎵 <i>در حال جستجو و دریافت آهنگ از پایگاه صوتی... ⏳</i>", {
+      statusMsg = await ctx.reply(statusText, {
         parse_mode: "HTML",
       }).catch(() => null);
     }

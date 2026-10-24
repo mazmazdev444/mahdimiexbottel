@@ -10,6 +10,8 @@ import {
   isSearchIntentQuery,
 } from "../src/services/ai";
 import { matchModelName } from "../src/index";
+import { extractMusicQuery } from "../src/services/musicService";
+import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
 
 describe("ai service helpers", () => {
   describe("checkProfanity", () => {
@@ -125,6 +127,62 @@ describe("ai service helpers", () => {
       expect(isSearchIntentQuery("سلام حالت چطوره")).toBe(false);
       expect(isSearchIntentQuery("یک شعر زیبا برام بنویس")).toBe(false);
       expect(isSearchIntentQuery("explain recursion in python")).toBe(false);
+    });
+  });
+
+  describe("extractMusicQuery (Spotify & song intent detection)", () => {
+    it("should detect Spotify URLs in various formats", () => {
+      const u1 = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT";
+      const u2 = "https://open.spotify.com/intl-fa/track/4cOdK2wGLETKBW3PvgPWqT?si=abc123";
+      const u3 = "https://spotify.link/xyz123";
+      expect(extractMusicQuery(u1)).toBe(u1);
+      expect(extractMusicQuery(u2)).toBe(u2);
+      expect(extractMusicQuery(u3)).toBe(u3);
+    });
+
+    it("should detect Spotify URLs embedded in Persian sentences", () => {
+      const text = "این آهنگ رو از اسپاتیفای برام دانلود کن: https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT";
+      expect(extractMusicQuery(text)).toBe("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT");
+    });
+
+    it("should detect SoundCloud URLs", () => {
+      const sc = "https://soundcloud.com/artist/song-name";
+      expect(extractMusicQuery(sc)).toBe(sc);
+    });
+
+    it("should match Persian and English song queries with and without aleph hat", () => {
+      expect(extractMusicQuery("دانلود آهنگ شادمهر تقدیر")).toBe("شادمهر تقدیر");
+      expect(extractMusicQuery("اهنگ شادمهر عقیلی")).toBe("شادمهر عقیلی");
+      expect(extractMusicQuery("دانلود اهنگ معین")).toBe("معین");
+      expect(extractMusicQuery("موزیک shape of you")).toBe("shape of you");
+      expect(extractMusicQuery("میشه اهنگ گل یخ کوروش یغمایی رو بفرستی")).toBe("گل یخ کوروش یغمایی");
+    });
+
+    it("should return null for non-music queries", () => {
+      expect(extractMusicQuery("سلام حالت چطوره")).toBeNull();
+      expect(extractMusicQuery("آب و هوای مشهد")).toBeNull();
+      expect(extractMusicQuery("قیمت دلار چنده")).toBeNull();
+    });
+  });
+
+  describe("mediaDownloader short URL cache & Spotify separation", () => {
+    it("should not treat Spotify as a generic media video URL", () => {
+      expect(isMediaUrl("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")).toBe(false);
+      expect(isMediaUrl("https://spotify.link/xyz")).toBe(false);
+    });
+
+    it("should treat YouTube and Instagram as media URLs", () => {
+      expect(isMediaUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(true);
+      expect(isMediaUrl("https://instagram.com/reel/abc")).toBe(true);
+    });
+
+    it("should generate short IDs (< 15 bytes) for long URLs to prevent Telegram 64-byte BUTTON_DATA_INVALID", () => {
+      const longUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&feature=share&utm_source=app&utm_medium=android_app&utm_campaign=share_channel_promo";
+      const id = storeMediaUrl(longUrl);
+      expect(id.length).toBeLessThan(15);
+      const callbackData = `dl_v:${id}`;
+      expect(Buffer.byteLength(callbackData, "utf-8")).toBeLessThan(25);
+      expect(getMediaUrl(id)).toBe(longUrl);
     });
   });
 });

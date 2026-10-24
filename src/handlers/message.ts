@@ -1,7 +1,7 @@
 import { Context, InlineKeyboard } from "grammy";
 import { askGemini, checkProfanity, isPersian, testGeminiKey, isSensitiveExfiltrationAttempt, STOPPED_RESULT } from "../services/ai";
-import { isMediaUrl } from "../services/mediaDownloader";
-import { sendMusicToTelegram } from "../services/musicService";
+import { isMediaUrl, storeMediaUrl } from "../services/mediaDownloader";
+import { sendMusicToTelegram, extractMusicQuery } from "../services/musicService";
 import { isGeneralWebUrl, fetchAndAnalyzeLink } from "../services/linkReader";
 import { queryBenchmark } from "../services/benchmarks";
 import { getWeather, extractWeatherIntent } from "../services/weather";
@@ -457,25 +457,9 @@ export async function handleTextMessage(ctx: Context) {
     return;
   }
 
-  // 3. دانلودر مدیا (YouTube, Instagram, Pinterest, TikTok, Twitter Media)
-  if (isMediaUrl(text)) {
-    incrementStat("downloads_requested");
-    const kb = new InlineKeyboard()
-      .text("🎬 دانلود ویدیو (MP4)", `dl_v:${text}`)
-      .text("🎵 استخراج موزیک (MP3)", `dl_a:${text}`)
-      .row()
-      .text("❌ انصراف", "dl_cancel");
-
-    await ctx.reply(
-      "📥 <b>لینک چندرسانه‌ای شناسایی شد!</b>\nنوع خروجی دلخواهتان را انتخاب کنید:",
-      { ...replyOpts, reply_markup: kb, parse_mode: "HTML" }
-    );
-    return;
-  }
-
-  // 3.5 دریافت و ارسال مستقیم آهنگ و فایل صوتی (سقف ۵۰ مگابایت)
-  const musicMatch = (cleanText || text).match(/^(?:دانلود\s+)?(?:آهنگ|موزیک|ترانه|موسیقی)\s+(.+)/i);
-  if (musicMatch && musicMatch[1]) {
+  // 3. دریافت و ارسال مستقیم آهنگ و فایل صوتی (اسپاتیفای، ساندکلاد و جستجوی نام آهنگ)
+  const musicQuery = extractMusicQuery(cleanText || text);
+  if (musicQuery) {
     incrementStat("downloads_requested");
     const chatId = ctx.chat?.id;
     const ownerId = ctx.from!.id;
@@ -490,11 +474,33 @@ export async function handleTextMessage(ctx: Context) {
       runningTasks.set(chatId, taskEntry);
     }
     try {
-      await sendMusicToTelegram(ctx, musicMatch[1].trim(), undefined, undefined, controller.signal);
+      await sendMusicToTelegram(ctx, musicQuery.trim(), undefined, undefined, controller.signal);
     } finally {
       if (chatId !== undefined && runningTasks.get(chatId) === taskEntry) {
         runningTasks.delete(chatId);
       }
+    }
+    return;
+  }
+
+  // 3.5 دانلودر مدیا (YouTube, Instagram, Pinterest, TikTok, Twitter Media)
+  if (isMediaUrl(text)) {
+    incrementStat("downloads_requested");
+    const urlId = storeMediaUrl(text);
+    const kb = new InlineKeyboard()
+      .text("🎬 دانلود ویدیو (MP4)", `dl_v:${urlId}`)
+      .text("🎵 استخراج موزیک (MP3)", `dl_a:${urlId}`)
+      .row()
+      .text("❌ انصراف", "dl_cancel");
+
+    try {
+      await ctx.reply(
+        "📥 <b>لینک چندرسانه‌ای شناسایی شد!</b>\nنوع خروجی دلخواهتان را انتخاب کنید:",
+        { ...replyOpts, reply_markup: kb, parse_mode: "HTML" }
+      );
+    } catch (e: any) {
+      console.warn("Media download button reply error:", e?.message || e);
+      await ctx.reply("📥 لینک چندرسانه‌ای شناسایی شد. لطفاً نوع خروجی را مشخص نمایید.", replyOpts).catch(() => {});
     }
     return;
   }

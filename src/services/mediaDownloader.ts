@@ -2,6 +2,31 @@ import { CONFIG } from "../config";
 import path from "path";
 import fs from "fs";
 
+const mediaUrlCache = new Map<string, { url: string; createdAt: number }>();
+
+/**
+ * ذخیره لینک در حافظه کش موقت و بازگرداندن یک شناسه کوتاه (جهت جلوگیری از خطای ۶۴ بایتی callback_data تلگرام)
+ */
+export function storeMediaUrl(url: string): string {
+  const id = Math.random().toString(36).substring(2, 10);
+  mediaUrlCache.set(id, { url: url.trim(), createdAt: Date.now() });
+  if (mediaUrlCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of mediaUrlCache.entries()) {
+      if (now - v.createdAt > 2 * 3600 * 1000) mediaUrlCache.delete(k);
+    }
+  }
+  return id;
+}
+
+/**
+ * بازیابی لینک اصلی از روی شناسه کوتاه یا بازگرداندن خود ورودی در صورت وجود لینک مستقیم
+ */
+export function getMediaUrl(idOrUrl: string): string {
+  const item = mediaUrlCache.get(idOrUrl.trim());
+  return item ? item.url : idOrUrl.trim();
+}
+
 export function isMediaUrl(text: string): boolean {
   const keywords = [
     "youtube.com",
@@ -13,7 +38,6 @@ export function isMediaUrl(text: string): boolean {
     "twitter.com",
     "x.com",
     "soundcloud.com",
-    "spotify.com",
   ];
   return keywords.some((k) => text.toLowerCase().includes(k));
 }
@@ -28,8 +52,6 @@ export async function downloadMedia(
   const args = [
     "yt-dlp",
     "--no-playlist",
-    "--extractor-args",
-    "youtube:player_client=android",
     "--max-filesize",
     "49M",
   ];

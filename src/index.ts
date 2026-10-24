@@ -53,7 +53,7 @@ import {
 import { ADMIN_REPLY_TARGET } from "./services/feedback";
 import { sendSafeMessage, withTyping } from "./utils/chunker";
 import { escapeHtml } from "./utils/formatter";
-import { downloadMedia, cleanupFile } from "./services/mediaDownloader";
+import { downloadMedia, cleanupFile, getMediaUrl } from "./services/mediaDownloader";
 import { sendMusicToTelegram } from "./services/musicService";
 import { generateChatDigest } from "./services/digestService";
 import { getWeather } from "./services/weather";
@@ -1588,7 +1588,8 @@ bot.callbackQuery("ack_report", async (ctx) => {
 
 // Downloader callbacks
 bot.callbackQuery(/^dl_v:(.+)$/, async (ctx) => {
-  const url = ctx.match[1];
+  const rawId = ctx.match[1];
+  const url = getMediaUrl(rawId);
   await ctx.editMessageText("⏳ <b>در حال دانلود ویدیو، لطفاً کمی صبور باشید...</b>", {
     parse_mode: "HTML",
   });
@@ -1613,7 +1614,8 @@ bot.callbackQuery(/^dl_v:(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^dl_a:(.+)$/, async (ctx) => {
-  const url = ctx.match[1];
+  const rawId = ctx.match[1];
+  const url = getMediaUrl(rawId);
   await ctx.editMessageText("⏳ <b>در حال تبدیل و دانلود فایل صوتی MP3...</b>", {
     parse_mode: "HTML",
   });
