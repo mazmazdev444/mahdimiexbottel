@@ -2,7 +2,7 @@ import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { markdownToTelegramHtml } from "../utils/formatter";
+import { markdownToTelegramHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
 
@@ -84,18 +84,25 @@ export async function handlePhotoMessage(ctx: Context) {
       }
       const analysis = markdownToTelegramHtml(rawAnalysis);
       const finalMsg = `🖼️ <b>تحلیل هوشمند تصویر توسط مزمز:</b>\n\n${analysis}${formatQuotaFooter(userId)}`;
+      const copyKb = createCopyMarkdownKeyboard(rawAnalysis);
 
       if (finalMsg.length <= 4000) {
         try {
-          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, { parse_mode: "HTML" });
+          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, {
+            parse_mode: "HTML",
+            reply_markup: copyKb,
+          });
         } catch {
-          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(() => {});
+          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`, {
+            reply_markup: copyKb,
+          }).catch(() => {});
         }
       } else {
         await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});
         await sendSafeMessage(ctx, finalMsg, {
           ...replyOpts,
           parse_mode: "HTML",
+          reply_markup: copyKb,
         });
       }
     } catch (err: any) {

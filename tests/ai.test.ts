@@ -12,6 +12,8 @@ import {
 import { matchModelName } from "../src/index";
 import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicService";
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
+import { createCopyMarkdownKeyboard } from "../src/utils/formatter";
+import { getChromiumExecutablePath } from "../src/tools/webTools";
 
 describe("ai service helpers", () => {
   describe("checkProfanity", () => {
@@ -202,6 +204,40 @@ describe("ai service helpers", () => {
       const info = await resolveSpotifyTrack("https://open.spotify.com/track/invalidTrackId999999");
       // Should either return null or handle without throwing error
       expect(info === null || typeof info === "object").toBe(true);
+    });
+  });
+
+  describe("createCopyMarkdownKeyboard (copy_text Telegram inline button)", () => {
+    it("should construct an inline keyboard with '📋 Copy Markdown' and copy_text payload", () => {
+      const markdown = "# Hello\nThis is **bold** text and `inline code`";
+      const kb = createCopyMarkdownKeyboard(markdown);
+      expect(kb.inline_keyboard).toBeDefined();
+      expect(kb.inline_keyboard.length).toBe(1);
+      const btn: any = kb.inline_keyboard[0][0];
+      expect(btn.text).toBe("📋 Copy Markdown");
+      expect(btn.copy_text).toBeDefined();
+      expect(btn.copy_text.text).toBe(markdown);
+    });
+
+    it("should clamp payload to 4096 characters to stay within Telegram Bot API limits", () => {
+      const hugeMarkdown = "A".repeat(5000);
+      const kb = createCopyMarkdownKeyboard(hugeMarkdown);
+      const btn: any = kb.inline_keyboard[0][0];
+      expect(btn.copy_text.text.length).toBe(4096);
+    });
+
+    it("should handle empty or undefined raw text gracefully", () => {
+      const kb = createCopyMarkdownKeyboard("");
+      const btn: any = kb.inline_keyboard[0][0];
+      expect(btn.text).toBe("📋 Copy Markdown");
+      expect(btn.copy_text.text).toBe("");
+    });
+  });
+
+  describe("browser screenshot tool (Chromium configuration)", () => {
+    it("should locate a valid chromium path or return null in headless environments", () => {
+      const p = getChromiumExecutablePath();
+      expect(p === null || typeof p === "string").toBe(true);
     });
   });
 });

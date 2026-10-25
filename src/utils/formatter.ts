@@ -116,3 +116,14 @@ export function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;");
 }
 
+import { InlineKeyboard } from "grammy";
+
+/**
+ * ایجاد کیبورد شیشه‌ای شامل دکمه کپی متن خام مارک‌داون
+ * با استفاده از ویژگی copy_text تلگرام
+ */
+export function createCopyMarkdownKeyboard(rawMarkdown: string): InlineKeyboard {
+  const textToCopy = rawMarkdown && rawMarkdown.length > 4096 ? rawMarkdown.slice(0, 4096) : (rawMarkdown || "");
+  return new InlineKeyboard().copyText("📋 Copy Markdown", textToCopy);
+}
+

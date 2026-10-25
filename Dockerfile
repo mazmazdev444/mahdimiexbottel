@@ -2,8 +2,8 @@ FROM public.ecr.aws/docker/library/debian:bookworm-slim
 
 WORKDIR /app
 
-# Install system dependencies & Bun & yt-dlp & nodejs (for yt-dlp JS challenge solver)
-RUN apt-get update && apt-get install -y sqlite3 ca-certificates curl ffmpeg python3 unzip nodejs && \
+# Install system dependencies & Bun & yt-dlp & nodejs & chromium
+RUN apt-get update && apt-get install -y sqlite3 ca-certificates curl ffmpeg python3 unzip nodejs chromium && \
     curl -fsSL https://bun.sh/install | bash && \
     curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp && \
