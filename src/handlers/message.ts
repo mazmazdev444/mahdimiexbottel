@@ -12,6 +12,7 @@ import { CONFIG, updateGeminiApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
 import { markdownToTelegramHtml, escapeHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
+import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
 import {
   isBugReport,
   isFeedbackOrCriticism,
@@ -756,10 +757,16 @@ export async function handleTextMessage(ctx: Context) {
     runningTasks.set(chatId, taskEntry);
   }
 
+  const currentText = cleanText || text;
+  const replyContextData = formatReplyContext(currentText, replyMsg);
+  const hasRepliedPhoto = Boolean(replyContextData.photoFileId);
+
   let statusMsg: any = null;
   let timer: any = null;
   let isDone = false;
-  const statusText = "💭 <i>در حال تفکر و تدوین پاسخ هوشمند... ⏳</i>";
+  const statusText = hasRepliedPhoto
+    ? "👁️‍🗨️ <i>در حال مشاهده تصویر ریپلای‌شده و تدوین پاسخ... ⏳</i>"
+    : "💭 <i>در حال تفکر و تدوین پاسخ هوشمند... ⏳</i>";
 
   try {
     statusMsg = await ctx.reply(statusText, {
@@ -794,17 +801,25 @@ export async function handleTextMessage(ctx: Context) {
       }
     }, 1000);
 
-    let replyContext = "";
-    if (replyMsg && replyUser) {
-      const sender = `${replyUser.first_name || ""} ${replyUser.last_name || ""}`.trim() || "نامشخص";
-      replyContext += `\n[کانتکست پیام ریپلای‌شده: فرستنده="${sender}" | شناسه عددی (user_id)=${replyUser.id} | متن="${replyMsg.text || replyMsg.caption || "[رسانه/عکس]"}" | شناسه پیام=${replyMsg.message_id}]`;
-    }
-    if (isGroup && ctx.chat) {
-      replyContext += `\n[کانتکست گروه: عنوان="${ctx.chat.title || "گروه"}" | شناسه عددی چت (chat_id)=${ctx.chat.id}]`;
+    // دانلود عکس در صورت ریپلای روی تصویر
+    let imageBase64: string | undefined = undefined;
+    if (replyContextData.photoFileId) {
+      try {
+        const b64 = await downloadTelegramPhotoAsBase64(replyContextData.photoFileId, ctx.api);
+        if (b64) {
+          imageBase64 = b64;
+        }
+      } catch (err: any) {
+        console.warn("[REPLY_PHOTO] Error downloading photo:", err?.message || err);
+      }
     }
 
-    const promptToSend = (cleanText || text) + replyContext;
-    const rawResponse = await withTyping(ctx, () => askGemini(userId, promptToSend, undefined, ctx, controller.signal));
+    let promptToSend = replyContextData.prompt;
+    if (isGroup && ctx.chat) {
+      promptToSend += `\n[کانتکست گروه: عنوان="${ctx.chat.title || "گروه"}" | شناسه عددی چت (chat_id)=${ctx.chat.id}]`;
+    }
+
+    const rawResponse = await withTyping(ctx, () => askGemini(userId, promptToSend, imageBase64, ctx, controller.signal));
 
     isDone = true;
     if (timer) {

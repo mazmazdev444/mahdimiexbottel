@@ -14,6 +14,7 @@ import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicSer
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
 import { createCopyMarkdownKeyboard } from "../src/utils/formatter";
 import { getChromiumExecutablePath } from "../src/tools/webTools";
+import { extractRepliedText, formatReplyContext } from "../src/utils/replyContext";
 
 describe("ai service helpers", () => {
   describe("checkProfanity", () => {
@@ -238,6 +239,77 @@ describe("ai service helpers", () => {
     it("should locate a valid chromium path or return null in headless environments", () => {
       const p = getChromiumExecutablePath();
       expect(p === null || typeof p === "string").toBe(true);
+    });
+  });
+
+  describe("reply_to_message context support", () => {
+    it("should extract direct text from replied message", () => {
+      const replyMsg = { text: "پایتون چیه؟" };
+      expect(extractRepliedText(replyMsg)).toBe("پایتون چیه؟");
+    });
+
+    it("should extract caption from replied message", () => {
+      const replyMsg = { caption: "کپشن عکس پرنده" };
+      expect(extractRepliedText(replyMsg)).toBe("کپشن عکس پرنده");
+    });
+
+    it("should extract emoji from replied sticker", () => {
+      const replyMsg = { sticker: { emoji: "🔥", set_name: "HotPack" } };
+      expect(extractRepliedText(replyMsg)).toBe("[Sticker 🔥]");
+    });
+
+    it("should handle sticker without emoji gracefully", () => {
+      const replyMsg = { sticker: { file_id: "stk123" } };
+      expect(extractRepliedText(replyMsg)).toBe("[Sticker]");
+    });
+
+    it("should extract caption or label from replied animation / GIF", () => {
+      const gifWithCaption = { animation: { file_id: "gif123" }, caption: "خنده شدید" };
+      expect(extractRepliedText(gifWithCaption)).toBe('[GIF: "خنده شدید"]');
+
+      const gifWithoutCaption = { animation: { file_id: "gif456" } };
+      expect(extractRepliedText(gifWithoutCaption)).toBe("[GIF animation]");
+    });
+
+    it("should format AI conversation context using: [Replied to: \"${repliedText}\"]\\nUser query: ${currentText}", () => {
+      const replyMsg = { text: "هوا در مشهد بارانیه" };
+      const res = formatReplyContext("چند درجه‌ست؟", replyMsg);
+      expect(res.prompt).toBe('[Replied to: "هوا در مشهد بارانیه"]\nUser query: چند درجه‌ست؟');
+      expect(res.repliedText).toBe("هوا در مشهد بارانیه");
+      expect(res.photoFileId).toBeNull();
+    });
+
+    it("should extract highest resolution photo (photo[photo.length - 1]) from replied message", () => {
+      const replyMsg = {
+        photo: [
+          { file_id: "small_id", width: 100, height: 100 },
+          { file_id: "medium_id", width: 400, height: 400 },
+          { file_id: "highest_res_id", width: 1280, height: 1280 },
+        ],
+        caption: "یک منظره کوهستانی",
+      };
+      const res = formatReplyContext("کجاست این؟", replyMsg);
+      expect(res.prompt).toBe('[Replied to: "یک منظره کوهستانی"]\nUser query: کجاست این؟');
+      expect(res.photoFileId).toBe("highest_res_id");
+    });
+
+    it("should handle photo without caption and extract highest resolution file_id", () => {
+      const replyMsg = {
+        photo: [
+          { file_id: "thumb_id" },
+          { file_id: "best_photo_id" },
+        ],
+      };
+      const res = formatReplyContext("توضیح بده", replyMsg);
+      expect(res.prompt).toBe('[Replied to: "[Photo]"]\nUser query: توضیح بده');
+      expect(res.photoFileId).toBe("best_photo_id");
+    });
+
+    it("should return original currentText when reply_to_message is undefined or null", () => {
+      const res = formatReplyContext("یک شعر بگو", null);
+      expect(res.prompt).toBe("یک شعر بگو");
+      expect(res.repliedText).toBeNull();
+      expect(res.photoFileId).toBeNull();
     });
   });
 });

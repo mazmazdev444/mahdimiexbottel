@@ -1,12 +1,10 @@
 import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
-import { HttpsProxyAgent } from "https-proxy-agent";
 import { markdownToTelegramHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
-
-const agent = CONFIG.USE_PROXY ? new HttpsProxyAgent(CONFIG.PROXY_URL) : undefined;
+import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
 
 export async function handlePhotoMessage(ctx: Context) {
   const photos = ctx.message?.photo;
@@ -52,7 +50,11 @@ export async function handlePhotoMessage(ctx: Context) {
     }
   }
 
-  const caption = ctx.message?.caption || "لطفاً این تصویر را با دقت و جزئیات کامل تحلیل و توضیح بده.";
+  const rawCaption = ctx.message?.caption || "لطفاً این تصویر را با دقت و جزئیات کامل تحلیل و توضیح بده.";
+  const replyMsg = ctx.message?.reply_to_message;
+  const replyContextData = formatReplyContext(rawCaption, replyMsg);
+  const caption = replyContextData.prompt;
+
   const statusMsg = await ctx.reply("👁️‍🗨️ <b>در حال دیدن و تحلیل هوشمند تصویر با مزمز... ⏳</b>", {
     ...replyOpts,
     parse_mode: "HTML",
@@ -61,21 +63,12 @@ export async function handlePhotoMessage(ctx: Context) {
   await withTyping(ctx, async () => {
     try {
       const bestPhoto = photos[photos.length - 1];
-      const file = await ctx.api.getFile(bestPhoto.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${CONFIG.BOT_TOKEN}/${file.file_path}`;
+      const base64 = await downloadTelegramPhotoAsBase64(bestPhoto.file_id, ctx.api);
 
-      const imgRes = await fetch(fileUrl, {
-        // @ts-ignore
-        agent,
-      });
-
-      if (!imgRes.ok) {
+      if (!base64) {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, "❌ خطا در دانلود تصویر از تلگرام.");
         return;
       }
-
-      const arrayBuffer = await imgRes.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
 
       const rawAnalysis = await askGemini(userId, caption, base64, ctx);
       if (!rawAnalysis || typeof rawAnalysis !== "string" || !rawAnalysis.trim()) {
