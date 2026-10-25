@@ -15,6 +15,7 @@ import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDow
 import { createCopyMarkdownKeyboard } from "../src/utils/formatter";
 import { getChromiumExecutablePath } from "../src/tools/webTools";
 import { extractRepliedText, formatReplyContext } from "../src/utils/replyContext";
+import { buildStickerPrompt, buildAnimationPrompt } from "../src/handlers/sticker";
 
 describe("ai service helpers", () => {
   describe("checkProfanity", () => {
@@ -310,6 +311,27 @@ describe("ai service helpers", () => {
       expect(res.prompt).toBe("یک شعر بگو");
       expect(res.repliedText).toBeNull();
       expect(res.photoFileId).toBeNull();
+    });
+  });
+
+  describe("sticker and animation prompt builders", () => {
+    it("should format sticker prompt with emoji: [User sent sticker: ${emoji}]", () => {
+      expect(buildStickerPrompt("😂")).toBe("[User sent sticker: 😂]");
+      expect(buildStickerPrompt("🔥")).toBe("[User sent sticker: 🔥]");
+    });
+
+    it("should handle sticker without emoji", () => {
+      expect(buildStickerPrompt("")).toBe("[User sent sticker: ]");
+      expect(buildStickerPrompt(undefined)).toBe("[User sent sticker: ]");
+    });
+
+    it("should format animation prompt with caption: [User sent a GIF animation. Caption: ${caption}]", () => {
+      expect(buildAnimationPrompt("خنده شدید")).toBe("[User sent a GIF animation. Caption: خنده شدید]");
+    });
+
+    it("should handle animation without caption", () => {
+      expect(buildAnimationPrompt("")).toBe("[User sent a GIF animation. Caption: ]");
+      expect(buildAnimationPrompt(undefined)).toBe("[User sent a GIF animation. Caption: ]");
     });
   });
 });

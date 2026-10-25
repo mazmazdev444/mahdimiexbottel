@@ -11,6 +11,7 @@ import {
 } from "./handlers/commands";
 import { handlePhotoMessage } from "./handlers/photo";
 import { handleTextMessage, runningTasks } from "./handlers/message";
+import { handleStickerMessage, handleAnimationMessage } from "./handlers/sticker";
 import { getSequentialKey } from "./utils/sequentialKey";
 import {
   getUserCount,
@@ -1232,6 +1233,10 @@ bot.on("message", async (ctx, next) => {
 
 // 3. Register Photo & Vision Handler
 bot.on("message:photo", handlePhotoMessage);
+
+// 3.1 Register Sticker & GIF/Animation Handlers
+bot.on("message:sticker", handleStickerMessage);
+bot.on("message:animation", handleAnimationMessage);
 
 // 3.5 هندلر ریاکشن خودکار برای پیام‌های خداحافظی و درود
 bot.hears(/(?:^|\s|[،.؟!])(خداحافظ|خدافظ|بای|بای\s?بای|فعلا|فعلاً|شب\s?بخیر|شبخیر|شب\s?خوش|درود|بدرود)(?:$|\s|[،.؟!])/ui, async (ctx, next) => {
