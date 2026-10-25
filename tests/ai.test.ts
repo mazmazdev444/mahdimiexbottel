@@ -10,7 +10,7 @@ import {
   isSearchIntentQuery,
 } from "../src/services/ai";
 import { matchModelName } from "../src/index";
-import { extractMusicQuery } from "../src/services/musicService";
+import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicService";
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
 
 describe("ai service helpers", () => {
@@ -183,6 +183,25 @@ describe("ai service helpers", () => {
       const callbackData = `dl_v:${id}`;
       expect(Buffer.byteLength(callbackData, "utf-8")).toBeLessThan(25);
       expect(getMediaUrl(id)).toBe(longUrl);
+    });
+  });
+
+  describe("resolveSpotifyTrack (exact metadata extraction)", () => {
+    it("should resolve real Spotify track title and artist accurately", async () => {
+      const info = await resolveSpotifyTrack("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT");
+      expect(info).not.toBeNull();
+      if (info) {
+        expect(info.title.toLowerCase()).toContain("never gonna give you up");
+        expect(info.artist.toLowerCase()).toContain("rick astley");
+        expect(info.searchQuery.toLowerCase()).toContain("rick astley");
+        expect(info.searchQuery.toLowerCase()).toContain("never gonna give you up");
+      }
+    });
+
+    it("should handle invalid or unresolvable URLs gracefully without throwing", async () => {
+      const info = await resolveSpotifyTrack("https://open.spotify.com/track/invalidTrackId999999");
+      // Should either return null or handle without throwing error
+      expect(info === null || typeof info === "object").toBe(true);
     });
   });
 });

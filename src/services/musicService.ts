@@ -12,6 +12,149 @@ export interface MusicDownloadResult {
   error?: string;
 }
 
+export interface SpotifyTrackInfo {
+  title: string;
+  artist: string;
+  duration?: number;
+  searchQuery: string;
+}
+
+/**
+ * استخراج دقیق اطلاعات قطعه (عنوان، خواننده و مدت زمان) از لینک اسپاتیفای
+ * از طریق SSR Embed (__NEXT_DATA__)، متادیتاهای OpenGraph و oEmbed
+ */
+export async function resolveSpotifyTrack(
+  url: string,
+  signal?: AbortSignal
+): Promise<SpotifyTrackInfo | null> {
+  const getSignal = (ms = 3500) => {
+    try {
+      return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
+    } catch {
+      return signal;
+    }
+  };
+
+  try {
+    let resolvedUrl = url.trim();
+    if (resolvedUrl.includes("spotify.link")) {
+      const redirectRes = await fetch(resolvedUrl, { redirect: "follow", signal: getSignal(4000) }).catch(() => null);
+      if (redirectRes?.url) resolvedUrl = redirectRes.url;
+    }
+
+    const trackMatch = resolvedUrl.match(/\/(track|album|episode)\/([a-zA-Z0-9]+)/i);
+    const itemType = trackMatch ? trackMatch[1].toLowerCase() : "track";
+    const itemId = trackMatch ? trackMatch[2] : null;
+
+    // روش ۱: استفاده از SSR Embed اسپاتیفای و خواندن __NEXT_DATA__
+    if (itemId) {
+      try {
+        const embedUrl = `https://open.spotify.com/embed/${itemType}/${itemId}`;
+        const embedRes = await fetch(embedUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          signal: getSignal(3500),
+        });
+
+        if (embedRes.ok) {
+          const html = await embedRes.text();
+          if (html.includes("Page not found")) {
+            return null;
+          }
+          const nextMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
+          if (nextMatch) {
+            const nextData = JSON.parse(nextMatch[1]);
+            const entity = nextData.props?.pageProps?.state?.data?.entity;
+            if (entity && (entity.name || entity.title)) {
+              const title = (entity.name || entity.title).trim();
+              const artist = Array.isArray(entity.artists)
+                ? entity.artists.map((a: any) => a.name).filter(Boolean).join(", ")
+                : "";
+              const duration = entity.duration ? Math.round(entity.duration / 1000) : undefined;
+              const searchQuery = artist ? `${artist} - ${title}` : title;
+              return { title, artist, duration, searchQuery };
+            }
+          }
+        } else if (embedRes.status === 404) {
+          return null;
+        }
+      } catch (e: any) {
+        console.warn("[MUSIC] Spotify embed SSR warning:", e?.message || e);
+      }
+    }
+
+    // روش ۲: دریافت متادیتا از صفحه اصلی قطعه
+    try {
+      const pageRes = await fetch(resolvedUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        signal: getSignal(3500),
+      });
+
+      if (pageRes.ok) {
+        const html = await pageRes.text();
+        const ogTitle = html.match(/<meta property="og:title" content="([^"]+)"/i)?.[1]?.trim();
+        const ogDesc = html.match(/<meta property="og:description" content="([^"]+)"/i)?.[1]?.trim();
+
+        if (ogTitle) {
+          let title = ogTitle;
+          let artist = "";
+
+          if (ogDesc && (ogDesc.includes("·") || ogDesc.includes("•"))) {
+            artist = ogDesc.split(/[·•]/)[0].trim();
+          }
+
+          const albumMatch = ogTitle.match(/Listen to (.+?)(?: - Album)? by (.+?)(?: \| Spotify)?$/i);
+          if (albumMatch) {
+            title = albumMatch[1].trim();
+            artist = albumMatch[2].trim();
+          }
+
+          const searchQuery = artist ? `${artist} - ${title}` : title;
+          return { title, artist, searchQuery };
+        }
+
+        const titleTag = html.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim();
+        if (titleTag) {
+          const m = titleTag.match(/^(.+?) - (?:Song|song)[^b]* by (.+?)(?: \| Spotify)?$/i);
+          if (m) {
+            const title = m[1].trim();
+            const artist = m[2].trim();
+            return { title, artist, searchQuery: `${artist} - ${title}` };
+          }
+        }
+      } else if (pageRes.status === 404) {
+        return null;
+      }
+    } catch (e: any) {
+      console.warn("[MUSIC] Spotify HTML scrape warning:", e?.message || e);
+    }
+
+    // روش ۳: fallback به oEmbed رسمی
+    try {
+      const oembedRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(resolvedUrl), { signal: getSignal(3500) });
+      if (oembedRes.ok) {
+        const oembedData = await oembedRes.json();
+        if (oembedData && oembedData.title) {
+          return {
+            title: oembedData.title.trim(),
+            artist: "",
+            searchQuery: oembedData.title.trim(),
+          };
+        }
+      }
+    } catch (e: any) {
+      console.warn("[MUSIC] Spotify oEmbed fallback warning:", e?.message || e);
+    }
+  } catch (err: any) {
+    console.error("[MUSIC] resolveSpotifyTrack error:", err);
+  }
+
+  return null;
+}
+
 /**
  * تشخیص هوشمند نیت دانلود موزیک، لینک‌های اسپاتیفای و ساندکلاد از متن پیام
  */
@@ -51,26 +194,21 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
   let query = cleanInput;
   let detectedTitle: string | undefined;
   let detectedPerformer: string | undefined;
+  let detectedDuration: number | undefined;
 
   const isSpotify = cleanInput.includes("spotify.com") || cleanInput.includes("spotify.link");
   if (isSpotify) {
-    try {
-      let resolvedUrl = cleanInput;
-      if (cleanInput.includes("spotify.link")) {
-        const redirectRes = await fetch(cleanInput, { redirect: "follow", signal }).catch(() => null);
-        if (redirectRes?.url) resolvedUrl = redirectRes.url;
+    const spotifyInfo = await resolveSpotifyTrack(cleanInput, signal);
+    if (spotifyInfo) {
+      detectedTitle = spotifyInfo.title;
+      if (spotifyInfo.artist) {
+        detectedPerformer = spotifyInfo.artist;
       }
-      const _sRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(resolvedUrl), { signal });
-      if (_sRes.ok) {
-        const _sData = await _sRes.json();
-        if (_sData && _sData.title) {
-          query = _sData.title;
-          detectedTitle = _sData.title;
-          if (_sData.provider_name) detectedPerformer = _sData.provider_name;
-        }
+      if (spotifyInfo.duration) {
+        detectedDuration = spotifyInfo.duration;
       }
-    } catch (e: any) {
-      console.warn("Spotify oEmbed resolution warning:", e?.message || e);
+      query = spotifyInfo.searchQuery;
+      console.log(`[MUSIC] Resolved Spotify: "${detectedPerformer}" - "${detectedTitle}" -> search: "${query}"`);
     }
   }
 
@@ -183,21 +321,21 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
       return { ok: false, error: `خطا در دریافت موزیک: ${stderr.slice(0, 150)}` };
     }
 
-    // استخراج متادیتا از خروجی yt-dlp
-    let title = "موزیک";
-    let performer = "مزمز";
-    let duration: number | undefined;
+    // استخراج متادیتا از خروجی yt-dlp (در اولویت بعد از دیتای رسمی اسپاتیفای)
+    let title = detectedTitle || "موزیک";
+    let performer = detectedPerformer || "مزمز";
+    let duration: number | undefined = detectedDuration;
 
     const metaLine = stdout.split("\n").find((l) => l.includes("<META>"));
     if (metaLine) {
       const parts = metaLine.split("<META>");
-      if (parts[0] && parts[0].trim() && parts[0].trim() !== "NA") {
+      if (!detectedTitle && parts[0] && parts[0].trim() && parts[0].trim() !== "NA") {
         title = parts[0].trim();
       }
-      if (parts[1] && parts[1].trim() && parts[1].trim() !== "NA") {
+      if (!detectedPerformer && parts[1] && parts[1].trim() && parts[1].trim() !== "NA") {
         performer = parts[1].trim();
       }
-      if (parts[2] && !isNaN(parseInt(parts[2], 10))) {
+      if (!detectedDuration && parts[2] && !isNaN(parseInt(parts[2], 10))) {
         duration = parseInt(parts[2], 10);
       }
     }
