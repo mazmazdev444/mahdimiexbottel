@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y sqlite3 ca-certificates curl ffmpeg pyt
     curl -fsSL https://bun.sh/install | bash && \
     curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp && \
+    (/usr/local/bin/yt-dlp -U || true) && \
     rm -rf /var/lib/apt/lists/*
 
 # Add Bun to PATH

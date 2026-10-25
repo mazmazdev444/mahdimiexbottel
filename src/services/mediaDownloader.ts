@@ -54,6 +54,15 @@ export async function downloadMedia(
     "--no-playlist",
     "--max-filesize",
     "49M",
+    "--no-check-certificates",
+    "--extractor-retries",
+    "3",
+    "--extractor-args",
+    "youtube:player_client=android,ios,web_creator",
+    "--js-runtimes",
+    "node",
+    "--user-agent",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   ];
 
   if (CONFIG.USE_PROXY && CONFIG.PROXY_URL) {
