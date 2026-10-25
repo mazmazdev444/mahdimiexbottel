@@ -119,11 +119,53 @@ export function escapeHtml(text: string): string {
 import { InlineKeyboard } from "grammy";
 
 /**
- * ایجاد کیبورد شیشه‌ای شامل دکمه کپی متن خام مارک‌داون
- * با استفاده از ویژگی copy_text تلگرام
+ * بررسی اینکه آیا متن پاسخ نیازمند دکمه کپی است یا خیر:
+ * ۱. بلوک کد چندخطی (```...```)
+ * ۲. دستورات شل یا متن‌های مونو‌اسپیس (`...`)
+ * ۳. متن‌های توضیحی و طولانی (بیش از ۴۰۰ کاراکتر)
  */
-export function createCopyMarkdownKeyboard(rawMarkdown: string): InlineKeyboard {
-  const textToCopy = rawMarkdown && rawMarkdown.length > 4096 ? rawMarkdown.slice(0, 4096) : (rawMarkdown || "");
-  return new InlineKeyboard().copyText("📋 Copy Markdown", textToCopy);
+export function shouldAttachCopyButton(text?: string | null): boolean {
+  if (!text || typeof text !== "string") return false;
+  const clean = text.trim();
+  if (!clean) return false;
+
+  // ۱. بررسی بلوک کد چندخطی
+  if (/```[\s\S]*?```/.test(clean)) return true;
+
+  // ۲. بررسی کدهای درون‌خطی، دستورات شل یا بلوک‌های مونو‌اسپیس
+  if (/`[^`]+`/.test(clean)) return true;
+
+  // ۳. بررسی متن‌های طولانی
+  if (clean.length > 400) return true;
+
+  return false;
 }
+
+/**
+ * ایجاد کیبورد شیشه‌ای شامل دکمه کپی متن با استفاده از copy_text تلگرام
+ */
+export function createCopyMarkdownKeyboard(
+  rawMarkdown: string,
+  buttonText: string = "📋 کپی متن"
+): InlineKeyboard {
+  const clean = (rawMarkdown || "").trim();
+  const cleanCodeOrText = clean.length > 4096 ? clean.slice(0, 4096) : clean;
+  return new InlineKeyboard().copyText(buttonText, cleanCodeOrText);
+}
+
+/**
+ * اتصال شرطی دکمه کپی متن:
+ * اگر شامل کد یا متن طولانی باشد کیبورد با دکمه کپی متن برمی‌گرداند؛
+ * در غیر این صورت undefined برمی‌گرداند تا هیچ reply_markup اضافه نشود.
+ */
+export function getConditionalCopyKeyboard(
+  rawMarkdown?: string | null,
+  buttonText: string = "📋 کپی متن"
+): InlineKeyboard | undefined {
+  if (!rawMarkdown || !shouldAttachCopyButton(rawMarkdown)) {
+    return undefined;
+  }
+  return createCopyMarkdownKeyboard(rawMarkdown, buttonText);
+}
+
 

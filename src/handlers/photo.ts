@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
-import { markdownToTelegramHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
 import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
@@ -77,7 +77,7 @@ export async function handlePhotoMessage(ctx: Context) {
       }
       const analysis = markdownToTelegramHtml(rawAnalysis);
       const finalMsg = `🖼️ <b>تحلیل هوشمند تصویر توسط مزمز:</b>\n\n${analysis}${formatQuotaFooter(userId)}`;
-      const copyKb = createCopyMarkdownKeyboard(rawAnalysis);
+      const copyKb = getConditionalCopyKeyboard(rawAnalysis);
 
       if (finalMsg.length <= 4000) {
         try {

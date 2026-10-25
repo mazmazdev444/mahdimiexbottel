@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
-import { markdownToTelegramHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
 import { withTyping } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
 import { formatReplyContext } from "../utils/replyContext";
@@ -82,7 +82,7 @@ export async function handleStickerMessage(ctx: Context) {
       }
 
       const formatted = markdownToTelegramHtml(rawResponse);
-      const copyKb = createCopyMarkdownKeyboard(rawResponse);
+      const copyKb = getConditionalCopyKeyboard(rawResponse);
       const finalMsg = `${formatted}${formatQuotaFooter(userId)}`;
 
       await ctx.reply(finalMsg, {
@@ -163,7 +163,7 @@ export async function handleAnimationMessage(ctx: Context) {
       }
 
       const formatted = markdownToTelegramHtml(rawResponse);
-      const copyKb = createCopyMarkdownKeyboard(rawResponse);
+      const copyKb = getConditionalCopyKeyboard(rawResponse);
       const finalMsg = `${formatted}${formatQuotaFooter(userId)}`;
 
       await ctx.reply(finalMsg, {

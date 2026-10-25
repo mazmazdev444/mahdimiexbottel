@@ -10,7 +10,7 @@ import { getDollarAndGoldReport } from "../services/currency";
 import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
 import { CONFIG, updateGeminiApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
-import { markdownToTelegramHtml, escapeHtml, createCopyMarkdownKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml, escapeHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
 import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
 import {
@@ -412,7 +412,7 @@ export async function handleTextMessage(ctx: Context) {
       return;
     }
     const formattedSummary = markdownToTelegramHtml(rawSummary);
-    const summaryCopyKb = createCopyMarkdownKeyboard(rawSummary);
+    const summaryCopyKb = getConditionalCopyKeyboard(rawSummary);
 
     try {
       await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, `📑 <b>خلاصه پیام‌های اخیر گروه:</b>\n\n${formattedSummary}`, {
@@ -874,7 +874,7 @@ export async function handleTextMessage(ctx: Context) {
     const customFooter = getSetting("custom_footer");
     const footerStr = customFooter ? `\n\n${customFooter}` : "";
     const finalResponse = `${formattedResponse}${footerStr}${formatQuotaFooter(userId)}`;
-    const copyKeyboard = createCopyMarkdownKeyboard(rawResponse);
+    const copyKeyboard = getConditionalCopyKeyboard(rawResponse);
 
     if (finalResponse.length <= 4000) {
       try {

@@ -52,6 +52,7 @@ import {
   deleteSetting,
 } from "./db";
 import { ADMIN_REPLY_TARGET } from "./services/feedback";
+import { LATEST_CHANGELOG } from "./latest_changelog";
 import { sendSafeMessage, withTyping } from "./utils/chunker";
 import { escapeHtml } from "./utils/formatter";
 import { downloadMedia, cleanupFile, getMediaUrl } from "./services/mediaDownloader";
@@ -2157,27 +2158,28 @@ async function launchBotWithResilience() {
             hour12: false,
           }).format(now);
 
-          // ارسال اعلان آپدیت جدید به تلگرام رئیس مهدی به همراه تاریخ، ساعت، کارهای جدید و رفع باگ‌ها
-          await bot.api.sendMessage(
-            adminId,
-            `🚀 <b>آپدیت جدید مزمز: یکپارچه‌سازی جستجوی چندلایه، امنیت محاسبات و مدیریت پایدار ابزارها!</b>\n\n` +
-            `📅 <b>زمان استقرار:</b> <code>${dateFa} | ساعت ${timeFa}</code>\n\n` +
-            `🛠️ <b>امکانات و بهبودهای این نسخه:</b>\n` +
-            `• 🔍 <b>موتور جستجوی پیشرفته چندلایه (Multi-Tier Web Search):</b>\n` +
-            `   اتصال کامل ابزار web_search به سیستم ۵ لایه (Tavily AI, Brave Search, SearXNG, DuckDuckGo Lite و اخبار زنده Google News RSS) به همراه بهینه‌سازی مصرف توکن.\n` +
-            `• 🌤️ <b>مقاوم‌سازی کامل سرویس آب‌وهوا:</b>\n` +
-            `   اعتبارسنجی دقیق کدهای وضعیت HTTP و بررسی پاسخ‌های متنی قبل از تبدیل به JSON در سرویس wttr.in و پشتیبانی دولایه خودکار در صورت قطعی هر سرور.\n` +
-            `• 🧮 <b>ارتقای امنیت و هوشمندی ماشین‌حساب (eval_math):</b>\n` +
-            `   لیست سفید سخت‌گیرانه شناسه‌ها، پشتیبانی کامل از ارقام فارسی (۰-۹) و نمادهای ضرب و تقسیم، جلوگیری از کدهای ناخواسته و مهار هوشمند تقسیم بر صفر و بی‌نهایت (Infinity/NaN).\n` +
-            `• 🛑 <b>توقف آنی پردازش‌ها با <code>/stop</code>:</b>\n` +
-            `   لغو فوری تولید پاسخ هوش مصنوعی و دانلود موزیک حین اجرا، با کنترل دسترسی اختصاصی (فقط درخواست‌دهنده و رئیس مهدی).\n` +
-            `• ⚡ <b>پردازش هم‌زمان و روان (Concurrent Runner):</b>\n` +
-            `   پاسخ‌دهی بلادرنگ و موازی بدون بلاک شدن صف پیام‌ها با <code>@grammyjs/runner</code>.\n` +
-            `• 📊 <b>لاگ‌گیری ساختاریافته عملکرد (runToolWithLogger):</b>\n` +
-            `   ثبت دقیق زمان تاخیر و وضعیت اجرای تمامی ابزارها با دیواره آتش خطا (Error Boundary) جهت جلوگیری از کرش.\n\n` +
-            `<i>مزمز پرسرعت، ایمن و وفادار در خدمت شماست، رئیس مهدی!</i>`,
-            { parse_mode: "HTML" }
-          ).catch((err) => console.warn("Could not send startup notification to admin:", err?.message));
+          // ارسال اعلان آپدیت جدید به تلگرام رئیس مهدی به همراه تاریخ، ساعت و کارهای جدید و باگ‌های رفع‌شده
+          const lastNotifiedVer = getSetting("last_notified_changelog_version");
+          if (lastNotifiedVer !== LATEST_CHANGELOG.version) {
+            let featureList = "";
+            for (const f of LATEST_CHANGELOG.features) {
+              featureList += `• <b>${escapeHtml(f.title)}:</b>\n   ${escapeHtml(f.desc)}\n`;
+            }
+
+            const updateMsg =
+              `🚀 <b>آپدیت جدید مزمز (نسخه ${LATEST_CHANGELOG.version})</b>\n\n` +
+              `📝 <b>عنوان:</b> ${escapeHtml(LATEST_CHANGELOG.title)}\n` +
+              `📅 <b>زمان استقرار:</b> <code>${dateFa} | ساعت ${timeFa}</code>\n\n` +
+              `🛠️ <b>امکانات و باگ‌های رفع‌شده در این نسخه:</b>\n` +
+              featureList +
+              `\n<i>مزمز پرسرعت، ایمن و وفادار در خدمت شماست، رئیس مهدی!</i>`;
+
+            await bot.api.sendMessage(adminId, updateMsg, { parse_mode: "HTML" })
+              .then(() => {
+                setSetting("last_notified_changelog_version", LATEST_CHANGELOG.version);
+              })
+              .catch((err) => console.warn("Could not send startup notification to admin:", err?.message));
+          }
         }
 
         // ثبت منوی ۷ دستور اسلش استاندارد در تلگرام برای کاربران و پاکسازی در گروه‌ها

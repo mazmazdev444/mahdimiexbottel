@@ -12,7 +12,7 @@ import {
 import { matchModelName } from "../src/index";
 import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicService";
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
-import { createCopyMarkdownKeyboard } from "../src/utils/formatter";
+import { createCopyMarkdownKeyboard, shouldAttachCopyButton, getConditionalCopyKeyboard } from "../src/utils/formatter";
 import { getChromiumExecutablePath } from "../src/tools/webTools";
 import { extractRepliedText, formatReplyContext } from "../src/utils/replyContext";
 import { buildStickerPrompt, buildAnimationPrompt } from "../src/handlers/sticker";
@@ -209,16 +209,23 @@ describe("ai service helpers", () => {
     });
   });
 
-  describe("createCopyMarkdownKeyboard (copy_text Telegram inline button)", () => {
-    it("should construct an inline keyboard with '📋 Copy Markdown' and copy_text payload", () => {
+  describe("copy_text Telegram inline button & conditional attachment", () => {
+    it("should construct an inline keyboard with '📋 کپی متن' by default and copy_text payload", () => {
       const markdown = "# Hello\nThis is **bold** text and `inline code`";
       const kb = createCopyMarkdownKeyboard(markdown);
       expect(kb.inline_keyboard).toBeDefined();
       expect(kb.inline_keyboard.length).toBe(1);
       const btn: any = kb.inline_keyboard[0][0];
-      expect(btn.text).toBe("📋 Copy Markdown");
+      expect(btn.text).toBe("📋 کپی متن");
       expect(btn.copy_text).toBeDefined();
       expect(btn.copy_text.text).toBe(markdown);
+    });
+
+    it("should support custom button text like '📋 Copy Markdown'", () => {
+      const markdown = "some code";
+      const kb = createCopyMarkdownKeyboard(markdown, "📋 Copy Markdown");
+      const btn: any = kb.inline_keyboard[0][0];
+      expect(btn.text).toBe("📋 Copy Markdown");
     });
 
     it("should clamp payload to 4096 characters to stay within Telegram Bot API limits", () => {
@@ -231,8 +238,44 @@ describe("ai service helpers", () => {
     it("should handle empty or undefined raw text gracefully", () => {
       const kb = createCopyMarkdownKeyboard("");
       const btn: any = kb.inline_keyboard[0][0];
-      expect(btn.text).toBe("📋 Copy Markdown");
+      expect(btn.text).toBe("📋 کپی متن");
       expect(btn.copy_text.text).toBe("");
+    });
+
+    it("shouldAttachCopyButton should return true for code blocks", () => {
+      const code = "در اینجا کد پایتون آمده است:\n```python\nprint('hello')\n```\nموفق باشید.";
+      expect(shouldAttachCopyButton(code)).toBe(true);
+    });
+
+    it("shouldAttachCopyButton should return true for inline code or shell commands", () => {
+      const shellCmd = "برای اجرا دستور `bun test` را بزنید.";
+      expect(shouldAttachCopyButton(shellCmd)).toBe(true);
+    });
+
+    it("shouldAttachCopyButton should return true for long-form text (> 400 chars)", () => {
+      const longText = "توضیحات جامع در مورد عملکرد سامانه و پردازش داده‌ها: ".repeat(15);
+      expect(longText.length).toBeGreaterThan(400);
+      expect(shouldAttachCopyButton(longText)).toBe(true);
+    });
+
+    it("shouldAttachCopyButton should return false for short chat, greetings, or banter", () => {
+      expect(shouldAttachCopyButton("سلام! روزت بخیر.")).toBe(false);
+      expect(shouldAttachCopyButton("خواهش می‌کنم، کاری نکردم! 😊")).toBe(false);
+      expect(shouldAttachCopyButton("چطوری؟")).toBe(false);
+      expect(shouldAttachCopyButton("")).toBe(false);
+      expect(shouldAttachCopyButton(null)).toBe(false);
+      expect(shouldAttachCopyButton(undefined)).toBe(false);
+    });
+
+    it("getConditionalCopyKeyboard should attach button only when needed and return undefined otherwise", () => {
+      const codeMsg = "دستور: `git status`";
+      const kbWithCode = getConditionalCopyKeyboard(codeMsg);
+      expect(kbWithCode).toBeDefined();
+      expect(kbWithCode?.inline_keyboard[0][0].text).toBe("📋 کپی متن");
+
+      const shortMsg = "سلام رئیس!";
+      const kbShort = getConditionalCopyKeyboard(shortMsg);
+      expect(kbShort).toBeUndefined();
     });
   });
 
