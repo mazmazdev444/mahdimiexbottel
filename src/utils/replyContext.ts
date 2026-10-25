@@ -77,8 +77,30 @@ export function formatReplyContext(currentText: string, replyMsg: any): ReplyCon
     }
   }
 
+  // تشخیص مبدأ پیام در صورت فوروارد بودن
+  let forwardSource = "";
+  if (replyMsg.forward_origin && typeof replyMsg.forward_origin === "object") {
+    const fo = replyMsg.forward_origin;
+    if (fo.type === "channel" && fo.chat?.title) {
+      const title = fo.chat.title.trim();
+      forwardSource = title.startsWith("کانال") ? ` (فوروارد از ${title})` : ` (فوروارد از کانال ${title})`;
+    } else if (fo.type === "chat" && fo.sender_chat?.title) {
+      const title = fo.sender_chat.title.trim();
+      forwardSource = title.startsWith("گروه") ? ` (فوروارد از ${title})` : ` (فوروارد از گروه ${title})`;
+    } else if (fo.type === "user" && fo.sender_user?.first_name) {
+      forwardSource = ` (فوروارد از ${fo.sender_user.first_name})`;
+    } else if (fo.type === "hidden_user" && fo.sender_user_name) {
+      forwardSource = ` (فوروارد از ${fo.sender_user_name})`;
+    }
+  } else if (replyMsg.forward_from_chat?.title) {
+    const title = replyMsg.forward_from_chat.title.trim();
+    forwardSource = title.startsWith("کانال") || title.startsWith("گروه") ? ` (فوروارد از ${title})` : ` (فوروارد از ${title})`;
+  } else if (replyMsg.forward_from?.first_name) {
+    forwardSource = ` (فوروارد از ${replyMsg.forward_from.first_name})`;
+  }
+
   const prompt = repliedText
-    ? `[Replied to: "${repliedText}"]\nUser query: ${currentText}`
+    ? `[Replied to: "${repliedText}"${forwardSource}]\nUser query: ${currentText}`
     : currentText;
 
   return {

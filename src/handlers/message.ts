@@ -112,9 +112,8 @@ export async function handleTextMessage(ctx: Context) {
       replyText += (
         `<i>هنوز گروهی در دیتابیس ثبت نشده است.</i>\n\n` +
         `💡 <b>برای ثبت فوری گروه:</b>\n` +
-        `۱️⃣ یک پیام از گروه را به پی‌وی من فوروارد کنید تا درجا شناسایی و فعال شود!\n` +
-        `۲️⃣ با ارسال یک پیام در گروه یا صدا زدن <code>مزمز</code>، ربات آن را خودکار ثبت می‌کند.\n` +
-        `۳️⃣ با دستور <code>/addgroup &lt;chat_id&gt;</code> گروه را بر اساس آیدی عددی ثبت کنید.`
+        `۱️⃣ با ارسال یک پیام در گروه یا صدا زدن <code>مزمز</code>، ربات آن را خودکار ثبت می‌کند.\n` +
+        `۲️⃣ با دستور <code>/addgroup &lt;chat_id&gt;</code> گروه را بر اساس آیدی عددی ثبت کنید.`
       );
     } else {
       for (const g of groups.slice(0, 10)) {
@@ -761,11 +760,21 @@ export async function handleTextMessage(ctx: Context) {
   const replyContextData = formatReplyContext(currentText, replyMsg);
   const hasRepliedPhoto = Boolean(replyContextData.photoFileId);
 
+  const isForwarded = Boolean(
+    ctx.message?.forward_origin ||
+    (ctx.message as any)?.forward_from ||
+    (ctx.message as any)?.forward_from_chat ||
+    (ctx.message as any)?.forward_sender_name ||
+    (ctx.message as any)?.forward_date
+  );
+
   let statusMsg: any = null;
   let timer: any = null;
   let isDone = false;
   const statusText = hasRepliedPhoto
     ? "👁️‍🗨️ <i>در حال مشاهده تصویر ریپلای‌شده و تدوین پاسخ... ⏳</i>"
+    : isForwarded
+    ? "📖 <i>در حال خواندن و تحلیل پیام فوروارد شده... ⏳</i>"
     : "💭 <i>در حال تفکر و تدوین پاسخ هوشمند... ⏳</i>";
 
   try {
@@ -815,6 +824,21 @@ export async function handleTextMessage(ctx: Context) {
     }
 
     let promptToSend = replyContextData.prompt;
+    if (!replyMsg && isForwarded) {
+      let fwdSource = "";
+      const fo = (ctx.message as any)?.forward_origin;
+      if (fo) {
+        if (fo.type === "channel" && fo.chat?.title) fwdSource = ` از کانال "${fo.chat.title}"`;
+        else if (fo.type === "chat" && fo.sender_chat?.title) fwdSource = ` از گروه "${fo.sender_chat.title}"`;
+        else if (fo.type === "user" && fo.sender_user?.first_name) fwdSource = ` از "${fo.sender_user.first_name}"`;
+        else if (fo.type === "hidden_user" && fo.sender_user_name) fwdSource = ` از "${fo.sender_user_name}"`;
+      } else if ((ctx.message as any)?.forward_from_chat?.title) {
+        fwdSource = ` از "${(ctx.message as any).forward_from_chat.title}"`;
+      } else if ((ctx.message as any)?.forward_from?.first_name) {
+        fwdSource = ` از "${(ctx.message as any).forward_from.first_name}"`;
+      }
+      promptToSend = `[پیام فوروارد شده${fwdSource}]:\n"""\n${currentText}\n"""\n[راهنما برای مدل: کاربر این پیام را صرفاً برای خواندن، بررسی یا پاسخ به محتوای آن برایت فوروارد کرده است. محتوای آن را تحلیل کن یا پاسخ مناسب ارائه کن.]`;
+    }
     if (isGroup && ctx.chat) {
       promptToSend += `\n[کانتکست گروه: عنوان="${ctx.chat.title || "گروه"}" | شناسه عددی چت (chat_id)=${ctx.chat.id}]`;
     }

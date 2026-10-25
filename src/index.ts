@@ -910,10 +910,9 @@ async function renderAdminGroups(ctx: any, isEdit = false) {
       `<i>هنوز گروهی در دیتابیس ثبت نشده است.</i>\n\n` +
       `💡 <b>چرا گروه‌های قبلی هنوز در لیست نیستند؟</b>\n` +
       `طبق معماری امنیتی تلگرام، ربات‌ها (برعکس کاربران عادی) متدی برای خواندن یک‌جای لیست گروه‌های گذشته خود ندارند (Telegram Bot API فاقد متد <code>getChats</code> است).\n\n` +
-      `🚀 <b>۳ روش فوق‌العاده سریع برای ثبت و دیدن گروه‌ها:</b>\n` +
-      `۱️⃣ <b>سریع‌ترین راه (فوروارد):</b> کافیست یک پیام از گروه موردنظر را به همین پی‌وی ربات فوروارد کنید تا درجا شناسایی و فعال شود!\n` +
-      `۲️⃣ <b>ارسال پیام در گروه:</b> با ارسال یک پیام، صدا زدن <code>مزمز</code> یا یک دستور در گروه، ربات آن را خودکار ثبت می‌کند.\n` +
-      `۳️⃣ <b>دستور دستی:</b> با دستور <code>/addgroup &lt;chat_id&gt;</code> گروه را بر اساس آیدی عددی ثبت کنید.`
+      `🚀 <b>روش‌های ثبت و دیدن گروه‌ها:</b>\n` +
+      `۱️⃣ <b>ارسال پیام در گروه:</b> با ارسال یک پیام، صدا زدن <code>مزمز</code> یا یک دستور در گروه، ربات آن را خودکار ثبت می‌کند.\n` +
+      `۲️⃣ <b>دستور دستی:</b> با دستور <code>/addgroup &lt;chat_id&gt;</code> گروه را بر اساس آیدی عددی ثبت کنید.`
     );
   } else {
     for (const g of groups.slice(0, 10)) {
@@ -980,8 +979,7 @@ bot.command(["addgroup", "addgroup@mazmazAgentBot"], async (ctx) => {
     return ctx.reply(
       `💡 <b>راهنمای ثبت دستی گروه:</b>\n\n` +
       `کافیست آیدی عددی گروه (معمولاً با <code>-100</code> شروع می‌شود) را وارد کنید:\n` +
-      `<code>/addgroup -1001234567890 [عنوان دلخواه]</code>\n\n` +
-      `<i>نکته: سریع‌ترین راه اینه که یه پیام از گروه رو به پی‌وی من فوروارد کنی تا درجا ثبت بشه!</i>`,
+      `<code>/addgroup -1001234567890 [عنوان دلخواه]</code>`,
       { parse_mode: "HTML" }
     );
   }
@@ -1179,57 +1177,6 @@ bot.command(["reply_user", "reply_user@mazmazAgentBot"], async (ctx) => {
 });
 
 
-
-// 2.5 تشخیص هوشمند فوروارد پیام از گروه به پی‌وی توسط رئیس مهدی جهت ثبت و فعال‌سازی فوری گروه
-bot.on("message", async (ctx, next) => {
-  const isPrivate = ctx.chat?.type === "private";
-  const userId = ctx.from?.id;
-  const isAdmin = userId && CONFIG.ADMIN_IDS.includes(userId);
-
-  if (isAdmin && isPrivate && ctx.message) {
-    const msg = ctx.message as any;
-    let forwardChat = msg.forward_from_chat;
-    if (!forwardChat && msg.forward_origin && typeof msg.forward_origin === "object") {
-      if (msg.forward_origin.type === "chat" || msg.forward_origin.type === "channel") {
-        forwardChat = msg.forward_origin.chat;
-      }
-    }
-
-    if (forwardChat && (forwardChat.type === "group" || forwardChat.type === "supergroup" || forwardChat.type === "channel")) {
-      const chatId = forwardChat.id;
-      const title = forwardChat.title || "گروه بدون عنوان";
-
-      registerOrUpdateGroup(
-        chatId,
-        title,
-        forwardChat.type,
-        userId,
-        "رئیس مهدی (ثبت با فوروارد)",
-        ctx.from?.username || "",
-        "approved"
-      );
-
-      const kb = new InlineKeyboard()
-        .text("👥 مشاهده در لیست گروه‌ها", "admin_groups")
-        .row()
-        .text("🔍 جزئیات این گروه", `grp_detail:${chatId}`)
-        .text("🚪 خروج از این گروه", `grp_leave:${chatId}`);
-
-      await ctx.reply(
-        `🎉 <b>گروه با موفقیت شناسایی و ثبت شد!</b>\n\n` +
-        `• عنوان گروه: <b>${escapeHtml(title)}</b>\n` +
-        `• آیدی عددی: <code>${chatId}</code>\n` +
-        `• نوع چت: <code>${forwardChat.type}</code>\n` +
-        `• وضعیت: ✅ <b>تایید شده و فعال</b>\n\n` +
-        `این گروه به دیتابیس افزوده شد و اکنون در منوی /groups قابل مدیریت است! 🚀`,
-        { reply_markup: kb, parse_mode: "HTML" }
-      );
-      return;
-    }
-  }
-
-  await next();
-});
 
 // 3. Register Photo & Vision Handler
 bot.on("message:photo", handlePhotoMessage);

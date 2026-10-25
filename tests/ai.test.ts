@@ -312,6 +312,28 @@ describe("ai service helpers", () => {
       expect(res.repliedText).toBeNull();
       expect(res.photoFileId).toBeNull();
     });
+
+    it("should include forward origin in reply context when replied message is forwarded", () => {
+      const replyMsgChannel = {
+        text: "اطلاعیه مهم",
+        forward_origin: {
+          type: "channel",
+          chat: { title: "اخبار فناوری" },
+        },
+      };
+      const resChannel = formatReplyContext("نظرت چیه؟", replyMsgChannel);
+      expect(resChannel.prompt).toBe('[Replied to: "اطلاعیه مهم" (فوروارد از کانال اخبار فناوری)]\nUser query: نظرت چیه؟');
+
+      const replyMsgChat = {
+        text: "سلام بچه ها",
+        forward_origin: {
+          type: "chat",
+          sender_chat: { title: "گروه برنامه‌نویسان" },
+        },
+      };
+      const resChat = formatReplyContext("خلاصه کن", replyMsgChat);
+      expect(resChat.prompt).toBe('[Replied to: "سلام بچه ها" (فوروارد از گروه برنامه‌نویسان)]\nUser query: خلاصه کن');
+    });
   });
 
   describe("sticker and animation prompt builders", () => {
