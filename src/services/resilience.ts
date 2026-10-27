@@ -9,6 +9,12 @@ export function markKeyDead(key: string): void {
   }
 }
 
+export function unmarkKeyDead(key: string): void {
+  if (key) {
+    DEAD_API_KEYS.delete(key);
+  }
+}
+
 export function isKeyDead(key: string): boolean {
   return DEAD_API_KEYS.has(key);
 }

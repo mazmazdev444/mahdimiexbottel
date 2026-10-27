@@ -67,12 +67,23 @@ export function validateStartupConfig(): void {
   }
 }
 
+let onApiKeyUpdate: ((key: string) => void) | null = null;
+export function setApiKeyUpdateCallback(cb: (key: string) => void): void {
+  onApiKeyUpdate = cb;
+}
+
 export function updateGeminiApiKey(newKey: string): boolean {
   const clean = sanitizeApiKey(newKey);
   if (!clean) return false;
   CONFIG.GEMINI_API_KEY = clean;
   if (!CONFIG.GEMINI_API_KEYS.includes(clean)) {
     CONFIG.GEMINI_API_KEYS.push(clean);
+  }
+
+  if (onApiKeyUpdate) {
+    try {
+      onApiKeyUpdate(clean);
+    } catch {}
   }
 
   try {

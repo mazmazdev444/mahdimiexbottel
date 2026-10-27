@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { CONFIG, updateGeminiApiKey, validateStartupConfig } from "./config";
+import { CONFIG, updateGeminiApiKey, validateStartupConfig, sanitizeApiKey, setApiKeyUpdateCallback } from "./config";
 import { accessControlMiddleware } from "./handlers/access";
 import {
   handleStart,
@@ -76,6 +76,7 @@ import {
 } from "./services/ai";
 import { fetchAndAnalyzeLink } from "./services/linkReader";
 import { setupTrackingMiddleware } from "./tools/adminTools";
+import { unmarkKeyDead } from "./services/resilience";
 
 console.log("🚀 Initializing mazmaz Telegram Bot with Bun & grammY...");
 
@@ -84,6 +85,26 @@ validateStartupConfig();
 if (!CONFIG.BOT_TOKEN) {
   console.error("❌ خطای اساسی: توکن ربات تلگرام (BOT_TOKEN) در متغیرهای محیطی (.env) تعریف نشده است!");
   process.exit(1);
+}
+
+// Hook up persistent Gemini API key callback
+setApiKeyUpdateCallback((key) => {
+  setSetting("gemini_api_key", key);
+  unmarkKeyDead(key);
+});
+
+// Restore persistent Gemini API key from database if available
+const storedStartupKey = getSetting("gemini_api_key");
+if (storedStartupKey) {
+  const cleanKey = sanitizeApiKey(storedStartupKey);
+  if (cleanKey) {
+    CONFIG.GEMINI_API_KEY = cleanKey;
+    if (!CONFIG.GEMINI_API_KEYS.includes(cleanKey)) {
+      CONFIG.GEMINI_API_KEYS.unshift(cleanKey);
+    }
+    unmarkKeyDead(cleanKey);
+    console.log("🔑 [CONFIG] Restored persistent Gemini API key from database.");
+  }
 }
 
 // Clean up any legacy dead models in stored settings
