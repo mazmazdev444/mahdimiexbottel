@@ -698,19 +698,32 @@ export function getGroupById(chatId: number): GroupInfo | null {
   return (db.query("SELECT * FROM groups WHERE chat_id = ?").get(chatId) as any) || null;
 }
 
-export function getAllGroups(): GroupInfo[] {
+export function deleteGroup(chatId: number): void {
+  db.run("DELETE FROM groups WHERE chat_id = ?", [chatId]);
+  db.run("DELETE FROM chats WHERE chat_id = ?", [chatId]);
+  saveStateSnapshot();
+}
+
+export function getAllGroups(onlyActive = true): GroupInfo[] {
+  if (onlyActive) {
+    return db
+      .query("SELECT * FROM groups WHERE status IN ('approved', 'pending') ORDER BY updated_at DESC, created_at DESC")
+      .all() as any[];
+  }
   return db.query("SELECT * FROM groups ORDER BY updated_at DESC, created_at DESC").all() as any[];
 }
 
 export function setGroupStatus(chatId: number, status: "pending" | "approved" | "rejected" | "left") {
+  if (status === "left" || status === "rejected") {
+    deleteGroup(chatId);
+    return;
+  }
   db.run("UPDATE groups SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?", [status, chatId]);
   if (status === "approved") {
     const grp = getGroupById(chatId);
     if (grp) {
       db.run("INSERT OR REPLACE INTO chats (chat_id, title) VALUES (?, ?)", [chatId, grp.title]);
     }
-  } else if (status === "left" || status === "rejected") {
-    db.run("DELETE FROM chats WHERE chat_id = ?", [chatId]);
   }
   saveStateSnapshot();
 }

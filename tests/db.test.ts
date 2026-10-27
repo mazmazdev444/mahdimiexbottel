@@ -18,6 +18,12 @@ import {
   deleteSetting,
   checkAndConsumeQuota,
   saveStateSnapshot,
+  registerOrUpdateGroup,
+  getGroupById,
+  getAllGroups,
+  setGroupStatus,
+  deleteGroup,
+  isGroupApproved,
 } from "../src/db";
 
 describe("database operations", () => {
@@ -99,5 +105,55 @@ describe("database operations", () => {
 
     deleteSetting("test_config_key");
     expect(getSetting("test_config_key")).toBe("");
+  });
+
+  describe("group management and pruning", () => {
+    const testGroupId = -1009988776655;
+
+    beforeAll(() => {
+      deleteGroup(testGroupId);
+    });
+
+    afterAll(() => {
+      deleteGroup(testGroupId);
+    });
+
+    it("should register a new group as pending", () => {
+      registerOrUpdateGroup(testGroupId, "Test Group", "supergroup", 12345, "Tester", "tester");
+      const grp = getGroupById(testGroupId);
+      expect(grp).toBeDefined();
+      expect(grp?.status).toBe("pending");
+      expect(isGroupApproved(testGroupId)).toBe(false);
+    });
+
+    it("should approve group and sync with chats table", () => {
+      setGroupStatus(testGroupId, "approved");
+      expect(isGroupApproved(testGroupId)).toBe(true);
+      const chatRow = db.query("SELECT * FROM chats WHERE chat_id = ?").get(testGroupId);
+      expect(chatRow).toBeDefined();
+    });
+
+    it("should only return active groups in getAllGroups()", () => {
+      const activeGroups = getAllGroups();
+      expect(activeGroups.some((g) => g.chat_id === testGroupId)).toBe(true);
+    });
+
+    it("should completely remove group from groups and chats on deleteGroup()", () => {
+      deleteGroup(testGroupId);
+      const grp = getGroupById(testGroupId);
+      expect(grp).toBeNull();
+      const chatRow = db.query("SELECT * FROM chats WHERE chat_id = ?").get(testGroupId);
+      expect(chatRow).toBeNull();
+      const activeGroups = getAllGroups();
+      expect(activeGroups.some((g) => g.chat_id === testGroupId)).toBe(false);
+    });
+
+    it("should delete group completely when setGroupStatus is called with 'left' or 'rejected'", () => {
+      registerOrUpdateGroup(testGroupId, "Test Group 2", "supergroup");
+      setGroupStatus(testGroupId, "left");
+      expect(getGroupById(testGroupId)).toBeNull();
+      expect(db.query("SELECT * FROM chats WHERE chat_id = ?").get(testGroupId)).toBeNull();
+      expect(getAllGroups().some((g) => g.chat_id === testGroupId)).toBe(false);
+    });
   });
 });

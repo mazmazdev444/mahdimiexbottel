@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { splitMessage } from "../src/utils/chunker";
+import { splitMessage, sendSafeMessage } from "../src/utils/chunker";
 
 describe("chunker utils", () => {
   it("should not split text shorter than maxLen", () => {
@@ -36,5 +36,63 @@ describe("chunker utils", () => {
     expect(chunks[0].endsWith("```")).toBe(true);
     // Check second chunk starts code block
     expect(chunks[1].startsWith("```")).toBe(true);
+  });
+
+  describe("sendSafeMessage button error handling", () => {
+    it("should strip reply_markup when BUTTON_COPY_TEXT_INVALID error occurs", async () => {
+      let callCount = 0;
+      let lastOpts: any = null;
+      const fakeCtx: any = {
+        message: { message_id: 111 },
+        reply: async (_text: string, opts: any) => {
+          callCount++;
+          lastOpts = opts;
+          if (callCount === 1) {
+            const err: any = new Error("Bad Request: BUTTON_COPY_TEXT_INVALID");
+            throw err;
+          }
+          return { message_id: 222 };
+        },
+      };
+
+      const badMarkup = { inline_keyboard: [[{ text: "Copy", copy_text: { text: "" } }]] };
+      await sendSafeMessage(fakeCtx, "Hello world", {
+        parse_mode: "HTML",
+        reply_markup: badMarkup,
+      });
+
+      expect(callCount).toBe(2);
+      expect(lastOpts).toBeDefined();
+      expect(lastOpts.reply_markup).toBeUndefined();
+    });
+
+    it("should retry without markup if second attempt with reply_markup fails", async () => {
+      let callCount = 0;
+      let lastOpts: any = null;
+      const fakeCtx: any = {
+        message: { message_id: 111 },
+        reply: async (_text: string, opts: any) => {
+          callCount++;
+          lastOpts = opts;
+          if (callCount === 1) {
+            throw new Error("can't parse entities");
+          }
+          if (callCount === 2) {
+            throw new Error("Bad Request: REPLY_MARKUP_INVALID");
+          }
+          return { message_id: 333 };
+        },
+      };
+
+      const markup = { inline_keyboard: [[{ text: "Test", callback_data: "test" }]] };
+      await sendSafeMessage(fakeCtx, "Hello again", {
+        parse_mode: "HTML",
+        reply_markup: markup,
+      });
+
+      expect(callCount).toBe(3);
+      expect(lastOpts).toBeDefined();
+      expect(lastOpts.reply_markup).toBeUndefined();
+    });
   });
 });

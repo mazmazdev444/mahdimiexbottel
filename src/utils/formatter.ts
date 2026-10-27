@@ -143,14 +143,29 @@ export function shouldAttachCopyButton(text?: string | null): boolean {
 
 /**
  * ایجاد کیبورد شیشه‌ای شامل دکمه کپی متن با استفاده از copy_text تلگرام
+ * اعتبارسنجی: متن باید غیرخالی و ۱ تا ۲۵۶ کاراکتر باشد (ترانکیت به ۲۵۶، یا حذف در صورت خالی بودن)
  */
 export function createCopyMarkdownKeyboard(
   rawMarkdown: string,
-  buttonText: string = "📋 کپی متن"
-): InlineKeyboard {
-  const clean = (rawMarkdown || "").trim();
-  const cleanCodeOrText = clean.length > 4096 ? clean.slice(0, 4096) : clean;
-  return new InlineKeyboard().copyText(buttonText, cleanCodeOrText);
+  buttonText: string = "📋 کپی متن",
+  maxLen: number = 256
+): InlineKeyboard | undefined {
+  if (!rawMarkdown || typeof rawMarkdown !== "string") return undefined;
+  const clean = rawMarkdown.trim();
+  if (!clean) return undefined;
+
+  const codeBlockMatch = clean.match(/```(?:[a-zA-Z0-9_+-]*\n)?([\s\S]*?)```/);
+  let textToCopy = codeBlockMatch ? codeBlockMatch[1].trim() : clean;
+  if (!textToCopy) textToCopy = clean;
+
+  if (textToCopy.length > maxLen) {
+    textToCopy = textToCopy.slice(0, maxLen);
+  }
+  if (textToCopy.length === 0) {
+    return undefined;
+  }
+
+  return new InlineKeyboard().copyText(buttonText, textToCopy);
 }
 
 /**
@@ -165,7 +180,17 @@ export function getConditionalCopyKeyboard(
   if (!rawMarkdown || !shouldAttachCopyButton(rawMarkdown)) {
     return undefined;
   }
-  return createCopyMarkdownKeyboard(rawMarkdown, buttonText);
+  return createCopyMarkdownKeyboard(rawMarkdown, buttonText, 256);
+}
+
+/**
+ * اعتبارسنجی callback_data برای جلوگیری از خطای BUTTON_DATA_INVALID تلگرام (حداکثر ۶۴ بایت UTF-8)
+ */
+export function safeCallbackData(data: string, maxBytes = 64): string {
+  if (!data) return "";
+  const buf = Buffer.from(data, "utf-8");
+  if (buf.length <= maxBytes) return data;
+  return buf.subarray(0, maxBytes).toString("utf-8");
 }
 
 

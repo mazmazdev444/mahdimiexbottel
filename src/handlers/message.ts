@@ -883,15 +883,17 @@ export async function handleTextMessage(ctx: Context) {
           reply_markup: copyKeyboard,
         });
       } catch (e: any) {
+        const isButtonErr = String(e?.message || "").includes("BUTTON_") || String(e?.message || "").includes("REPLY_MARKUP_");
+        const fallbackMarkup = isButtonErr ? undefined : copyKeyboard;
         try {
           await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `${rawResponse}${formatQuotaFooter(userId)}`, {
-            reply_markup: copyKeyboard,
+            reply_markup: fallbackMarkup,
           });
         } catch {
           await sendSafeMessage(ctx, finalResponse, {
             ...replyOpts,
             parse_mode: "HTML",
-            reply_markup: copyKeyboard,
+            reply_markup: undefined,
           }).catch(() => {});
         }
       }

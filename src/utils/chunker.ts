@@ -115,12 +115,29 @@ export async function sendSafeMessage(
     try {
       await ctx.reply(chunks[i], opts);
     } catch (err: any) {
-      // Fallback without parse_mode if invalid HTML tags
-      console.warn("Failed sending with parse_mode, falling back to plain text:", err.message);
-      await ctx.reply(chunks[i], {
-        reply_markup: opts.reply_markup,
-        reply_parameters: opts.reply_parameters,
-      });
+      const errMsg = String(err?.message || "");
+      const isButtonError = errMsg.includes("BUTTON_") || errMsg.includes("REPLY_MARKUP_");
+      console.warn("Failed sending with parse_mode, falling back to plain text:", errMsg);
+
+      const fallbackMarkup = isButtonError ? undefined : opts.reply_markup;
+      try {
+        await ctx.reply(chunks[i], {
+          reply_markup: fallbackMarkup,
+          reply_parameters: opts.reply_parameters,
+        });
+      } catch (fallbackErr: any) {
+        // If fallback with reply_markup failed, retry once more completely stripped of reply_markup
+        if (fallbackMarkup) {
+          console.warn("Fallback with reply_markup failed, retrying plain text without markup:", fallbackErr?.message);
+          await ctx.reply(chunks[i], {
+            reply_parameters: opts.reply_parameters,
+          }).catch((finalErr) => {
+            console.error("Critical: Failed to deliver text message even without markup:", finalErr?.message);
+          });
+        } else {
+          console.error("Critical: Failed to deliver plain text message:", fallbackErr?.message);
+        }
+      }
     }
     if (chunks.length > 1 && !isLast) {
       await new Promise((r) => setTimeout(r, 250));

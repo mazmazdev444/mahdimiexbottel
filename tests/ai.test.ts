@@ -206,7 +206,7 @@ describe("ai service helpers", () => {
       const info = await resolveSpotifyTrack("https://open.spotify.com/track/invalidTrackId999999");
       // Should either return null or handle without throwing error
       expect(info === null || typeof info === "object").toBe(true);
-    });
+    }, 15000);
   });
 
   describe("copy_text Telegram inline button & conditional attachment", () => {
@@ -228,18 +228,17 @@ describe("ai service helpers", () => {
       expect(btn.text).toBe("📋 Copy Markdown");
     });
 
-    it("should clamp payload to 4096 characters to stay within Telegram Bot API limits", () => {
-      const hugeMarkdown = "A".repeat(5000);
+    it("should clamp payload to 256 characters to prevent Telegram BUTTON_COPY_TEXT_INVALID", () => {
+      const hugeMarkdown = "A".repeat(500);
       const kb = createCopyMarkdownKeyboard(hugeMarkdown);
-      const btn: any = kb.inline_keyboard[0][0];
-      expect(btn.copy_text.text.length).toBe(4096);
+      expect(kb).toBeDefined();
+      const btn: any = kb!.inline_keyboard[0][0];
+      expect(btn.copy_text.text.length).toBe(256);
     });
 
-    it("should handle empty or undefined raw text gracefully", () => {
-      const kb = createCopyMarkdownKeyboard("");
-      const btn: any = kb.inline_keyboard[0][0];
-      expect(btn.text).toBe("📋 کپی متن");
-      expect(btn.copy_text.text).toBe("");
+    it("should return undefined on empty or invalid text to omit broken button", () => {
+      expect(createCopyMarkdownKeyboard("")).toBeUndefined();
+      expect(createCopyMarkdownKeyboard("   ")).toBeUndefined();
     });
 
     it("shouldAttachCopyButton should return true for code blocks", () => {

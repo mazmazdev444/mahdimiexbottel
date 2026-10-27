@@ -2,7 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { getChatHistory, saveChatMessage, clearChatHistory, getSetting, getApprovedRules } from "../database";
 import { CONFIG } from "../config";
-import { getActiveGeminiKey, markKeyCooldown } from "./resilience";
+import { getActiveGeminiKey, markKeyCooldown, markKeyDead, isKeyDead, maskApiKey } from "./resilience";
 import { getWeather, extractWeatherIntent } from "./weather";
 import { executeTool } from "../tools/index";
 import { webToolsDeclaration } from "../tools/webTools";
@@ -106,7 +106,7 @@ export function getResolvedActiveModel(): ModelResolution {
 
 export const modelCooldowns = new Map<string, { expiresAt: number; logged: boolean }>();
 
-export function markModelCooldown(modelName: string, durationMs = 60000): void {
+export function markModelCooldown(modelName: string, durationMs = 300000): void {
   modelCooldowns.set(modelName, {
     expiresAt: Date.now() + durationMs,
     logged: false,
@@ -338,7 +338,8 @@ export const STOPPED_RESULT = "⛔ متوقف شد";
 async function callGenerateContentWithAbort(
   aiClient: any,
   params: any,
-  sig?: AbortSignal
+  sig?: AbortSignal,
+  timeoutMs = 10000
 ): Promise<any> {
   if (sig?.aborted) {
     const err: any = new Error("Request aborted");
@@ -356,23 +357,43 @@ async function callGenerateContentWithAbort(
     config: callConfig,
   });
 
-  if (!sig) return callPromise;
+  let timeoutTimer: any;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutTimer = setTimeout(() => {
+      const err: any = new Error(`Request timed out after ${timeoutMs}ms`);
+      err.name = "TimeoutError";
+      reject(err);
+    }, timeoutMs);
+  });
 
-  return Promise.race([
-    callPromise,
-    new Promise((_, reject) => {
-      const onAbort = () => {
-        const err: any = new Error("Request aborted");
-        err.name = "AbortError";
-        reject(err);
-      };
-      if (sig.aborted) {
-        onAbort();
-      } else {
-        sig.addEventListener("abort", onAbort, { once: true });
-      }
-    }),
-  ]);
+  const promises: Promise<any>[] = [callPromise, timeoutPromise];
+
+  let abortHandler: (() => void) | undefined;
+  if (sig) {
+    promises.push(
+      new Promise((_, reject) => {
+        abortHandler = () => {
+          const err: any = new Error("Request aborted");
+          err.name = "AbortError";
+          reject(err);
+        };
+        if (sig.aborted) {
+          abortHandler();
+        } else {
+          sig.addEventListener("abort", abortHandler, { once: true });
+        }
+      })
+    );
+  }
+
+  try {
+    return await Promise.race(promises);
+  } finally {
+    clearTimeout(timeoutTimer);
+    if (sig && abortHandler) {
+      sig.removeEventListener("abort", abortHandler);
+    }
+  }
 }
 
 export async function askGemini(
@@ -431,13 +452,17 @@ export async function askGemini(
   }
 
   try {
-    const rawHistory = getChatHistory(userId, 6);
+    const rawHistory = getChatHistory(userId, 8);
     const rawContents: Array<any> = [];
 
     for (const msg of rawHistory) {
+      let contentText = msg.content || msg.text || "";
+      if (contentText.length > 800) {
+        contentText = contentText.slice(0, 800) + "...";
+      }
       rawContents.push({
         role: msg.role === "user" ? "user" : "model",
-        parts: [{ text: msg.content || msg.text || "" }],
+        parts: [{ text: contentText }],
       });
     }
 
@@ -894,8 +919,8 @@ export async function askGemini(
     const tempRaw = parseFloat(getSetting("ai_temperature", "0.7"));
     const activeTemperature = !isNaN(tempRaw) && tempRaw >= 0.0 && tempRaw <= 2.0 ? tempRaw : 0.7;
 
-    const keyPool = CONFIG.GEMINI_API_KEYS.filter((k) => k && k.length > 5);
-    if (keyPool.length === 0 && apiKey) {
+    const keyPool = CONFIG.GEMINI_API_KEYS.filter((k) => k && k.length > 5 && !isKeyDead(k));
+    if (keyPool.length === 0 && apiKey && !isKeyDead(apiKey)) {
       keyPool.push(apiKey);
     }
     let currentKeyIdx = 0;
@@ -924,6 +949,10 @@ export async function askGemini(
     for (const m of modelCandidates) {
       if (modelSucceeded) break;
       if (signal?.aborted) return STOPPED_RESULT;
+      if (keyPool.length === 0) {
+        console.warn(`[GEMINI] No active API keys remaining in keyPool. Skipping candidate loop.`);
+        break;
+      }
 
       activeModelName = m;
       const workingContents = JSON.parse(JSON.stringify(contents));
@@ -959,13 +988,9 @@ export async function askGemini(
                       },
                     }
                   : {}),
-                ...(thinkingBudget > 0
-                  ? {
-                      thinkingConfig: {
-                        thinkingBudget,
-                      },
-                    }
-                  : {}),
+                thinkingConfig: {
+                  thinkingBudget,
+                },
               },
             },
             signal
@@ -983,12 +1008,58 @@ export async function askGemini(
               ? 503
               : String(err?.message || "").includes("429")
               ? 429
+              : String(err?.message || "").includes("401")
+              ? 401
+              : String(err?.message || "").includes("403")
+              ? 403
               : String(err?.message || "").includes("404")
               ? 404
               : 0);
 
-          // If model doesn't support thinkingConfig (400), retry call 1 without thinkingConfig
-          if (status === 400 && thinkingBudget > 0) {
+          // 1. Auth errors (401, 403, API_KEY_INVALID): mark key permanently dead & retry SAME model with next key
+          const isAuthError =
+            status === 401 ||
+            status === 403 ||
+            String(err?.message || "").includes("API_KEY_INVALID") ||
+            String(err?.message || "").includes("API key not valid") ||
+            String(err?.message || "").includes("invalid api key");
+
+          if (isAuthError) {
+            markKeyDead(currentKey);
+            console.warn(
+              `[GEMINI AUTH ERROR] Model ${m} API key ${maskApiKey(currentKey)} is invalid/revoked (status ${status}). Disabling key permanently.`
+            );
+            keysTriedCall1++;
+            const idx = keyPool.indexOf(currentKey);
+            if (idx !== -1) {
+              keyPool.splice(idx, 1);
+            }
+            if (keyPool.length > 0) {
+              currentKeyIdx = currentKeyIdx % keyPool.length;
+              console.warn(
+                `[GEMINI ROTATE] Retrying model ${m} call 1 with next available API key (${keyPool.length} key(s) remaining)...`
+              );
+              call1Attempt--; // Do not consume attempt counter on key rotation
+              continue; // RETRY SAME MODEL WITH NEXT HEALTHY KEY!
+            } else {
+              console.warn(`[GEMINI SKIP] All API keys are dead or revoked. Skipping model ${m}...`);
+              break;
+            }
+          }
+
+          // 2. Per-request timeout (10s): mark model in 5-minute cooldown and switch candidate
+          const isTimeout =
+            err?.name === "TimeoutError" ||
+            status === 504 ||
+            String(err?.message || "").includes("timed out");
+          if (isTimeout) {
+            console.warn(`[GEMINI TIMEOUT] Model ${m} call 1 timed out after 10s. Entering 5-minute cooldown and switching candidate...`);
+            markModelCooldown(m, 300000);
+            break;
+          }
+
+          // 3. If model doesn't support thinkingConfig (400), retry call 1 without thinkingConfig
+          if (status === 400) {
             if (signal?.aborted) return STOPPED_RESULT;
             try {
               call1Res = await callGenerateContentWithAbort(
@@ -1023,8 +1094,7 @@ export async function askGemini(
             }
           }
 
-          // If 429 or 400 occurred and googleSearch was included in tools, it means the API key lacks Google Grounding quota.
-          // Fall back immediately to custom tools without cooling down the key or model.
+          // If 429 or 400 occurred and googleSearch was included in tools, fall back to custom search
           if ((status === 429 || status === 400) && tools.some((t: any) => t?.googleSearch)) {
             console.warn(`[GEMINI] Tool googleSearch quota exceeded (status ${status}). Falling back to custom web_search...`);
             tools = [{ functionDeclarations }];
@@ -1032,41 +1102,40 @@ export async function askGemini(
             continue;
           }
 
-          // Non-retryable errors (400, 401, 403, 404): skip candidate immediately
-          if (status === 400 || status === 401 || status === 403 || status === 404) {
+          // Non-retryable errors (400, 404): skip candidate immediately
+          if (status === 400 || status === 404) {
             console.warn(`[GEMINI SKIP] Model ${m} returned status ${status}. Skipping to next candidate...`);
             break;
           }
 
-          // Rate limit (429): rotate key if possible, do NOT retry same model if no other key
+          // Rate limit (429): rotate key if possible; if all keys exhausted, put model into 5-minute cooldown
           if (status === 429) {
             markKeyCooldown(currentKey, 60000);
-            markModelCooldown(m, 60000);
             keysTriedCall1++;
             if (keysTriedCall1 < keyPool.length && keyPool.length > 1) {
               currentKeyIdx = (currentKeyIdx + 1) % keyPool.length;
               console.warn(`[GEMINI ROTATE] Model ${m} hit 429 on call 1. Rotating to next key (${keysTriedCall1 + 1}/${keyPool.length})...`);
-              call1Attempt--; // don't count key rotation as 503/500 attempt
+              call1Attempt--; // don't count key rotation as attempt
               continue;
             } else {
-              console.warn(`[GEMINI SKIP] Model ${m} hit 429 on call 1 and no more keys available. Skipping candidate...`);
+              console.warn(`[GEMINI SKIP] Model ${m} hit 429 on all keys on call 1. Entering 5-minute cooldown and skipping candidate...`);
+              markModelCooldown(m, 300000);
               break;
             }
           }
 
-          // Server errors (503, 500): retry same model with exponential backoff + jitter
+          // Server errors (503, 500): max 1 retry with ~800ms delay, then 5-minute cooldown
           if (status === 503 || status === 500) {
-            if (call1Attempt < 3) {
+            if (call1Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
-              const baseDelay = call1Attempt === 1 ? 1000 : 2000;
-              const jitter = Math.floor(Math.random() * 300);
-              const totalDelay = baseDelay + jitter;
-              console.warn(`[GEMINI RETRY] Model ${m} call 1 failed with status ${status} (attempt ${call1Attempt}/3). Retrying in ${totalDelay}ms...`);
+              const totalDelay = 800 + Math.floor(Math.random() * 200);
+              console.warn(`[GEMINI RETRY] Model ${m} call 1 failed with status ${status} (attempt ${call1Attempt}/2). Retrying in ${totalDelay}ms...`);
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 1 failed after 3 attempts (${status}), switching candidate...`);
+              console.warn(`[GEMINI FALLBACK] Model ${m} call 1 failed after 1 retry (${status}). Entering 5-minute cooldown and switching candidate...`);
+              markModelCooldown(m, 300000);
               break;
             }
           }
@@ -1249,13 +1318,9 @@ export async function askGemini(
             mode: "NONE" as any,
           },
         },
-        ...(thinkingBudget > 0
-          ? {
-              thinkingConfig: {
-                thinkingBudget,
-              },
-            }
-          : {}),
+        thinkingConfig: {
+          thinkingBudget,
+        },
       };
 
       if (signal?.aborted) {
@@ -1295,11 +1360,57 @@ export async function askGemini(
               ? 503
               : String(err?.message || "").includes("429")
               ? 429
+              : String(err?.message || "").includes("401")
+              ? 401
+              : String(err?.message || "").includes("403")
+              ? 403
               : String(err?.message || "").includes("404")
               ? 404
               : 0);
 
-          // If model doesn't support thinkingConfig (400), retry call 2 without thinkingConfig
+          // 1. Auth errors (401, 403, API_KEY_INVALID): mark key permanently dead & retry SAME model with next key
+          const isAuthError =
+            status === 401 ||
+            status === 403 ||
+            String(err?.message || "").includes("API_KEY_INVALID") ||
+            String(err?.message || "").includes("API key not valid") ||
+            String(err?.message || "").includes("invalid api key");
+
+          if (isAuthError) {
+            markKeyDead(currentKey);
+            console.warn(
+              `[GEMINI AUTH ERROR] Model ${m} API key ${maskApiKey(currentKey)} is invalid/revoked on call 2 (status ${status}). Disabling key permanently.`
+            );
+            keysTriedCall2++;
+            const idx = keyPool.indexOf(currentKey);
+            if (idx !== -1) {
+              keyPool.splice(idx, 1);
+            }
+            if (keyPool.length > 0) {
+              currentKeyIdx = currentKeyIdx % keyPool.length;
+              console.warn(
+                `[GEMINI ROTATE] Retrying model ${m} call 2 with next available API key (${keyPool.length} key(s) remaining)...`
+              );
+              call2Attempt--;
+              continue;
+            } else {
+              console.warn(`[GEMINI SKIP] All API keys are dead or revoked on call 2. Skipping model ${m}...`);
+              break;
+            }
+          }
+
+          // 2. Per-request timeout (10s)
+          const isTimeout =
+            err?.name === "TimeoutError" ||
+            status === 504 ||
+            String(err?.message || "").includes("timed out");
+          if (isTimeout) {
+            console.warn(`[GEMINI TIMEOUT] Model ${m} call 2 timed out after 10s. Entering 5-minute cooldown and switching candidate...`);
+            markModelCooldown(m, 300000);
+            break;
+          }
+
+          // 3. If model doesn't support thinkingConfig (400), retry call 2 without thinkingConfig
           if (status === 400 && String(err?.message || "").toLowerCase().includes("thinking")) {
             if (signal?.aborted) return STOPPED_RESULT;
             try {
@@ -1338,14 +1449,14 @@ export async function askGemini(
             continue;
           }
 
-          if (status === 400 || status === 401 || status === 403 || status === 404) {
+          if (status === 400 || status === 404) {
             console.warn(`[GEMINI SKIP] Model ${m} returned status ${status} on call 2. Skipping...`);
             break;
           }
 
+          // Rate limit (429): rotate key if possible; if all keys exhausted, put model into 5-minute cooldown
           if (status === 429) {
             markKeyCooldown(currentKey, 60000);
-            markModelCooldown(m, 60000);
             keysTriedCall2++;
             if (keysTriedCall2 < keyPool.length && keyPool.length > 1) {
               currentKeyIdx = (currentKeyIdx + 1) % keyPool.length;
@@ -1353,23 +1464,24 @@ export async function askGemini(
               call2Attempt--;
               continue;
             } else {
-              console.warn(`[GEMINI SKIP] Model ${m} hit 429 on call 2 and no more keys. Skipping candidate...`);
+              console.warn(`[GEMINI SKIP] Model ${m} hit 429 on call 2 and all keys exhausted. Entering 5-minute cooldown and skipping candidate...`);
+              markModelCooldown(m, 300000);
               break;
             }
           }
 
+          // Server errors (503, 500): max 1 retry with ~800ms delay, then 5-minute cooldown
           if (status === 503 || status === 500) {
-            if (call2Attempt < 3) {
+            if (call2Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
-              const baseDelay = call2Attempt === 1 ? 1000 : 2000;
-              const jitter = Math.floor(Math.random() * 300);
-              const totalDelay = baseDelay + jitter;
-              console.warn(`[GEMINI RETRY] Model ${m} call 2 failed with status ${status} (attempt ${call2Attempt}/3). Retrying in ${totalDelay}ms...`);
+              const totalDelay = 800 + Math.floor(Math.random() * 200);
+              console.warn(`[GEMINI RETRY] Model ${m} call 2 failed with status ${status} (attempt ${call2Attempt}/2). Retrying in ${totalDelay}ms...`);
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 2 failed after 3 attempts (${status}), switching candidate...`);
+              console.warn(`[GEMINI FALLBACK] Model ${m} call 2 failed after 1 retry (${status}). Entering 5-minute cooldown and switching candidate...`);
+              markModelCooldown(m, 300000);
               break;
             }
           }
@@ -1413,7 +1525,7 @@ export async function askGemini(
           }
           const status = retryErr?.status || retryErr?.error?.code || (String(retryErr?.message || "").includes("429") ? 429 : 0);
           if (status === 429) {
-            markModelCooldown(m, 60000);
+            markModelCooldown(m, 300000);
           }
           console.warn(`[GEMINI] Retry of second call failed:`, retryErr?.message || retryErr);
         }

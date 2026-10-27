@@ -1,12 +1,33 @@
 import { CONFIG } from "../config";
 
 const KEY_COOLDOWNS = new Map<string, number>();
+export const DEAD_API_KEYS = new Set<string>();
+
+export function markKeyDead(key: string): void {
+  if (key) {
+    DEAD_API_KEYS.add(key);
+  }
+}
+
+export function isKeyDead(key: string): boolean {
+  return DEAD_API_KEYS.has(key);
+}
+
+export function resetDeadKeys(): void {
+  DEAD_API_KEYS.clear();
+}
+
+export function maskApiKey(key: string): string {
+  if (!key || key.length < 8) return "***";
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
 
 export function markKeyCooldown(key: string, durationMs = 60000) {
   KEY_COOLDOWNS.set(key, Date.now() + durationMs);
 }
 
 export function isKeyAvailable(key: string): boolean {
+  if (DEAD_API_KEYS.has(key)) return false;
   const expiresAt = KEY_COOLDOWNS.get(key);
   if (!expiresAt) return true;
   if (Date.now() > expiresAt) {
@@ -18,8 +39,10 @@ export function isKeyAvailable(key: string): boolean {
 
 let keyIndex = 0;
 export function getActiveGeminiKey(): string {
-  const allKeys = CONFIG.GEMINI_API_KEYS.filter((k) => k.length > 5);
-  if (allKeys.length === 0) return CONFIG.GEMINI_API_KEY;
+  const allKeys = CONFIG.GEMINI_API_KEYS.filter((k) => k.length > 5 && !isKeyDead(k));
+  if (allKeys.length === 0) {
+    return !isKeyDead(CONFIG.GEMINI_API_KEY) ? CONFIG.GEMINI_API_KEY : "";
+  }
 
   // Filter available (not in cooldown)
   const available = allKeys.filter(isKeyAvailable);

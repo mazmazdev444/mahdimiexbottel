@@ -85,10 +85,14 @@ export async function handlePhotoMessage(ctx: Context) {
             parse_mode: "HTML",
             reply_markup: copyKb,
           });
-        } catch {
+        } catch (e: any) {
+          const isButtonErr = String(e?.message || "").includes("BUTTON_") || String(e?.message || "").includes("REPLY_MARKUP_");
+          const fallbackMarkup = isButtonErr ? undefined : copyKb;
           await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`, {
-            reply_markup: copyKb,
-          }).catch(() => {});
+            reply_markup: fallbackMarkup,
+          }).catch(async () => {
+            await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(() => {});
+          });
         }
       } else {
         await ctx.api.deleteMessage(ctx.chat!.id, statusMsg.message_id).catch(() => {});

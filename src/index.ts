@@ -40,6 +40,7 @@ import {
   registerOrUpdateGroup,
   getGroupById,
   getAllGroups,
+  deleteGroup,
   setGroupStatus,
   isGroupApproved,
   clearChatContext,
@@ -192,7 +193,7 @@ bot.on("my_chat_member", async (ctx) => {
       }).catch((e) => console.warn("Failed to notify admin of group invite:", e?.message));
     }
   } else if (status === "left" || status === "kicked") {
-    setGroupStatus(chat.id, "left");
+    deleteGroup(chat.id);
   }
 });
 
@@ -1975,10 +1976,26 @@ bot.callbackQuery(/^grp_sync:(\-?\d+)$/, async (ctx) => {
     registerOrUpdateGroup(chatId, title, chat.type);
 
     let role = "عضو";
+    let isLeftOrKicked = false;
     try {
       const member = await ctx.api.getChatMember(chatId, ctx.me.id);
-      role = member.status === "administrator" ? "👑 مدیر (Admin)" : member.status === "member" ? "👤 عضو عادی (Member)" : member.status;
+      if (member.status === "left" || member.status === "kicked") {
+        isLeftOrKicked = true;
+      } else {
+        role = member.status === "administrator" ? "👑 مدیر (Admin)" : member.status === "member" ? "👤 عضو عادی (Member)" : member.status;
+      }
     } catch {}
+
+    if (isLeftOrKicked) {
+      deleteGroup(chatId);
+      const kb = new InlineKeyboard().text("🔙 بازگشت به لیست گروه‌ها", "admin_groups");
+      await ctx.editMessageText(
+        `🚪 <b>ربات دیگر در گروه «${escapeHtml(title)}» حضور ندارد (وضعیت left/kicked).</b>\nاین گروه از لیست دیتابیس پاک شد.`,
+        { reply_markup: kb, parse_mode: "HTML" }
+      ).catch(() => {});
+      await ctx.answerCallbackQuery({ text: "ربات از گروه خارج شده بود؛ رکورد گروه حذف گردید." });
+      return;
+    }
 
     const g = getGroupById(chatId);
     const statusText = g?.status === "approved" ? "✅ تایید شده و فعال" : g?.status === "pending" ? "⏳ در انتظار تایید" : "🚪 خارج شده";
@@ -2057,13 +2074,17 @@ bot.callbackQuery(/^grp_(?:reject|leave):(\-?\d+)$/, async (ctx) => {
     console.warn("Could not leave chat:", e?.message);
   }
 
-  setGroupStatus(chatId, "left");
+  deleteGroup(chatId);
+
+  const kb = new InlineKeyboard()
+    .text("👥 لیست گروه‌ها", "admin_groups")
+    .text("🔙 بازگشت به پنل ادمین", "menu_admin");
 
   await ctx.editMessageText(
-    `🚪 <b>ربات با موفقیت از گروه «${escapeHtml(grpTitle)}» (<code>${chatId}</code>) خارج شد.</b>`,
-    { parse_mode: "HTML" }
+    `🚪 <b>ربات با موفقیت از گروه «${escapeHtml(grpTitle)}» (<code>${chatId}</code>) خارج شد و اطلاعات آن از دیتابیس حذف گردید.</b>`,
+    { reply_markup: kb, parse_mode: "HTML" }
   ).catch(() => {});
-  await ctx.answerCallbackQuery({ text: "از گروه خارج شد." });
+  await ctx.answerCallbackQuery({ text: "از گروه خارج شد و رکورد آن حذف گردید." });
 });
 
 let activeRunner: ReturnType<typeof run> | null = null;

@@ -1,5 +1,5 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
-import { db, setSetting } from "../db";
+import { db, setSetting, deleteGroup } from "../db";
 import { CONFIG } from "../config";
 
 // ۱. اسکیماهای تفکیک‌شده ابزارهای مدیریتی برای هوش مصنوعی
@@ -357,7 +357,7 @@ export async function executeAdminTool(botOrApi: any, ctx: Context | any, name: 
     case "manage_bot_chats": {
       if (args.action === "list") {
         try {
-          const groups = db.prepare("SELECT chat_id, title, type, status, added_by_name FROM groups").all();
+          const groups = db.prepare("SELECT chat_id, title, type, status, added_by_name FROM groups WHERE status IN ('approved', 'pending')").all();
           if (groups.length > 0) return { ok: true, groups, count: groups.length };
         } catch {}
         const chats = db.prepare("SELECT chat_id, title FROM chats").all();
@@ -370,8 +370,8 @@ export async function executeAdminTool(botOrApi: any, ctx: Context | any, name: 
         } catch (e: any) {
           console.warn("Could not leave chat via API:", e?.message);
         }
-        db.prepare("DELETE FROM chats WHERE chat_id = ?").run(targetChat);
-        return { ok: true, message: `بات از گروه ${targetChat} خارج شد.` };
+        deleteGroup(targetChat);
+        return { ok: true, message: `بات از گروه ${targetChat} خارج شد و اطلاعات گروه حذف گردید.` };
       }
       return { error: "عملیات نامعتبر" };
     }

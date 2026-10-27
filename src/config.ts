@@ -12,6 +12,16 @@ function getDatabasePath(): string {
   return path.resolve(import.meta.dir, "../data/bot.sqlite");
 }
 
+export function sanitizeApiKey(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let k = raw.trim();
+  k = k.replace(/^["'«“‘]+|["'»”’]+$/g, "").trim();
+  if (k.length < 5 || k.toLowerCase().includes("your_api_key") || k.toLowerCase().includes("placeholder")) {
+    return "";
+  }
+  return k;
+}
+
 export const CONFIG = {
   BOT_TOKEN: process.env.BOT_TOKEN || "",
   ADMIN_IDS: (process.env.ADMIN_IDS || "8062873417")
@@ -23,10 +33,10 @@ export const CONFIG = {
   CREATOR_ID: 8062873417,
   PROXY_URL: process.env.PROXY_URL || "http://127.0.0.1:10808",
   USE_PROXY: process.env.USE_PROXY !== "false",
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  GEMINI_API_KEY: sanitizeApiKey(process.env.GEMINI_API_KEY || ""),
   GEMINI_API_KEYS: (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "")
     .split(",")
-    .map((k) => k.trim())
+    .map(sanitizeApiKey)
     .filter(Boolean),
   AI_MODEL: process.env.AI_MODEL || "gemini-3.5-flash-lite",
   GEMINI_MODELS: (process.env.GEMINI_MODELS || "gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash")
@@ -58,7 +68,8 @@ export function validateStartupConfig(): void {
 }
 
 export function updateGeminiApiKey(newKey: string): boolean {
-  const clean = newKey.trim();
+  const clean = sanitizeApiKey(newKey);
+  if (!clean) return false;
   CONFIG.GEMINI_API_KEY = clean;
   if (!CONFIG.GEMINI_API_KEYS.includes(clean)) {
     CONFIG.GEMINI_API_KEYS.push(clean);
@@ -68,9 +79,9 @@ export function updateGeminiApiKey(newKey: string): boolean {
     const envPath = path.resolve(import.meta.dir, "../.env");
     let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";
     if (content.includes("GEMINI_API_KEY=")) {
-      content = content.replace(/GEMINI_API_KEY=.*$/m, `GEMINI_API_KEY=${newKey.trim()}`);
+      content = content.replace(/GEMINI_API_KEY=.*$/m, `GEMINI_API_KEY=${clean}`);
     } else {
-      content += `\nGEMINI_API_KEY=${newKey.trim()}\n`;
+      content += `\nGEMINI_API_KEY=${clean}\n`;
     }
     fs.writeFileSync(envPath, content, "utf-8");
     return true;
