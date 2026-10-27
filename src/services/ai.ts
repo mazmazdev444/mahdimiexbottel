@@ -27,6 +27,7 @@ const FUNNY_POLITE_ROASTS = [
 ];
 
 export function checkProfanity(text: string): string | null {
+  if (!text || typeof text !== "string") return null;
   const lower = text.toLowerCase();
   for (const bad of PROFANITY_WORDS) {
     const regex = new RegExp(`\\b${bad}\\b|[\\s_]${bad}[\\s_]|^${bad}$`, "i");
