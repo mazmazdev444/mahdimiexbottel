@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
-import { markdownToTelegramHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml } from "../utils/formatter";
 import { withTyping } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
 import { formatReplyContext } from "../utils/replyContext";
@@ -82,13 +82,11 @@ export async function handleStickerMessage(ctx: Context) {
       }
 
       const formatted = markdownToTelegramHtml(rawResponse);
-      const copyKb = getConditionalCopyKeyboard(rawResponse);
       const finalMsg = `${formatted}${formatQuotaFooter(userId)}`;
 
       await ctx.reply(finalMsg, {
         ...replyOpts,
         parse_mode: "HTML",
-        reply_markup: copyKb,
       });
     } catch (err: any) {
       console.error("[STICKER_HANDLER] Error reacting to sticker:", err);
@@ -163,13 +161,11 @@ export async function handleAnimationMessage(ctx: Context) {
       }
 
       const formatted = markdownToTelegramHtml(rawResponse);
-      const copyKb = getConditionalCopyKeyboard(rawResponse);
       const finalMsg = `${formatted}${formatQuotaFooter(userId)}`;
 
       await ctx.reply(finalMsg, {
         ...replyOpts,
         parse_mode: "HTML",
-        reply_markup: copyKb,
       });
     } catch (err: any) {
       console.error("[ANIMATION_HANDLER] Error reacting to animation:", err);

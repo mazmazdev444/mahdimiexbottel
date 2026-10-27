@@ -10,7 +10,7 @@ import { getDollarAndGoldReport } from "../services/currency";
 import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
 import { CONFIG, updateGeminiApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
-import { markdownToTelegramHtml, escapeHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml, escapeHtml } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
 import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
 import {
@@ -412,18 +412,15 @@ export async function handleTextMessage(ctx: Context) {
       return;
     }
     const formattedSummary = markdownToTelegramHtml(rawSummary);
-    const summaryCopyKb = getConditionalCopyKeyboard(rawSummary);
 
     try {
       await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, `📑 <b>خلاصه پیام‌های اخیر گروه:</b>\n\n${formattedSummary}`, {
         parse_mode: "HTML",
-        reply_markup: summaryCopyKb,
       });
     } catch {
       await ctx.reply(`📑 <b>خلاصه پیام‌های اخیر گروه:</b>\n\n${formattedSummary}`, {
         ...replyOpts,
         parse_mode: "HTML",
-        reply_markup: summaryCopyKb,
       });
     }
     return;
@@ -874,26 +871,19 @@ export async function handleTextMessage(ctx: Context) {
     const customFooter = getSetting("custom_footer");
     const footerStr = customFooter ? `\n\n${customFooter}` : "";
     const finalResponse = `${formattedResponse}${footerStr}${formatQuotaFooter(userId)}`;
-    const copyKeyboard = getConditionalCopyKeyboard(rawResponse);
 
     if (finalResponse.length <= 4000) {
       try {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalResponse, {
           parse_mode: "HTML",
-          reply_markup: copyKeyboard,
         });
       } catch (e: any) {
-        const isButtonErr = String(e?.message || "").includes("BUTTON_") || String(e?.message || "").includes("REPLY_MARKUP_");
-        const fallbackMarkup = isButtonErr ? undefined : copyKeyboard;
         try {
-          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `${rawResponse}${formatQuotaFooter(userId)}`, {
-            reply_markup: fallbackMarkup,
-          });
+          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `${rawResponse}${formatQuotaFooter(userId)}`);
         } catch {
           await sendSafeMessage(ctx, finalResponse, {
             ...replyOpts,
             parse_mode: "HTML",
-            reply_markup: undefined,
           }).catch(() => {});
         }
       }
@@ -902,7 +892,6 @@ export async function handleTextMessage(ctx: Context) {
       await sendSafeMessage(ctx, finalResponse, {
         ...replyOpts,
         parse_mode: "HTML",
-        reply_markup: copyKeyboard,
       });
     }
   } catch (err: any) {

@@ -1,7 +1,7 @@
 import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
-import { markdownToTelegramHtml, createCopyMarkdownKeyboard, getConditionalCopyKeyboard } from "../utils/formatter";
+import { markdownToTelegramHtml } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
 import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
@@ -77,20 +77,14 @@ export async function handlePhotoMessage(ctx: Context) {
       }
       const analysis = markdownToTelegramHtml(rawAnalysis);
       const finalMsg = `🖼️ <b>تحلیل هوشمند تصویر توسط مزمز:</b>\n\n${analysis}${formatQuotaFooter(userId)}`;
-      const copyKb = getConditionalCopyKeyboard(rawAnalysis);
 
       if (finalMsg.length <= 4000) {
         try {
           await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, {
             parse_mode: "HTML",
-            reply_markup: copyKb,
           });
         } catch (e: any) {
-          const isButtonErr = String(e?.message || "").includes("BUTTON_") || String(e?.message || "").includes("REPLY_MARKUP_");
-          const fallbackMarkup = isButtonErr ? undefined : copyKb;
-          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`, {
-            reply_markup: fallbackMarkup,
-          }).catch(async () => {
+          await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(async () => {
             await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(() => {});
           });
         }
@@ -99,7 +93,6 @@ export async function handlePhotoMessage(ctx: Context) {
         await sendSafeMessage(ctx, finalMsg, {
           ...replyOpts,
           parse_mode: "HTML",
-          reply_markup: copyKb,
         });
       }
     } catch (err: any) {

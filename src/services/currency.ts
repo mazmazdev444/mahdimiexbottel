@@ -204,11 +204,11 @@ export async function getDollarAndGoldReport(): Promise<{ text: string; chartUrl
     `<code>کف: ${data.dollarLow.toLocaleString()} ت</code> ▕${bar}▏ <code>سقف: ${data.dollarHigh.toLocaleString()} ت</code>\n` +
     `📍 <i>موقعیت فعلی در بازه روز: <b>${data.rangePercent}%</b></i>\n\n` +
     `📈 <b>نمودار شماتیک روند نوسان روزانه:</b>\n` +
-    `<pre>` +
+    `<pre><code class="language-text">` +
     `${kHigh} ┤        ╭─── سقف روز\n` +
     `${kCur} ┤    ╭───╯    ● فعلی (${data.dollar.toLocaleString()})\n` +
     `${kLow} ┴────╯ کف روز` +
-    `</pre>`
+    `</code></pre>`
   );
 
   return { text, chartUrl: data.chartUrl };

@@ -38,6 +38,14 @@ describe("chunker utils", () => {
     expect(chunks[1].startsWith("```")).toBe(true);
   });
 
+  it("should preserve and close open HTML <pre><code class='language-...'> blocks across split boundaries", () => {
+    const htmlCode = '<pre><code class="language-bash">\n' + 'echo "test"\n'.repeat(10) + '</code></pre>';
+    const chunks = splitMessage(htmlCode, 80);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0].endsWith("</code></pre>")).toBe(true);
+    expect(chunks[1].startsWith('<pre><code class="language-bash">')).toBe(true);
+  });
+
   describe("sendSafeMessage button error handling", () => {
     it("should strip reply_markup when BUTTON_COPY_TEXT_INVALID error occurs", async () => {
       let callCount = 0;

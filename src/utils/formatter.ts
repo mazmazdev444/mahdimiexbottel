@@ -7,20 +7,42 @@
 export function markdownToTelegramHtml(markdown: string): string {
   if (!markdown) return "";
 
+  // If an unclosed code block exists, close it cleanly so it converts properly
+  let safeMarkdown = markdown;
+  const tripleBackticks = (safeMarkdown.match(/```/g) || []).length;
+  if (tripleBackticks % 2 !== 0) {
+    safeMarkdown += "\n```";
+  }
+
   const codeBlocks: string[] = [];
   const inlineCodes: string[] = [];
 
   // 1. Extract fenced code blocks first so inner content is completely untouched
-  let formatted = markdown.replace(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const escaped = code
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-    const langAttr = lang ? ` class="language-${lang}"` : "";
-    const index = codeBlocks.length;
-    codeBlocks.push(`<pre><code${langAttr}>${escaped}</code></pre>`);
-    return `§§§CB${index}§§§`;
-  });
+  let formatted = safeMarkdown.replace(
+    /```([a-zA-Z0-9_+#-]*)[^\n\S]*\r?\n?([\s\S]*?)```/g,
+    (_, lang, code) => {
+      const cleanLang = (lang || "").trim().toLowerCase();
+      // Default to "text" if no language specified so Telegram displays native copy header
+      const finalLang = cleanLang || "text";
+
+      // Strip single trailing newline before closing fence if present
+      let codeContent = code;
+      if (codeContent.endsWith("\r\n")) {
+        codeContent = codeContent.slice(0, -2);
+      } else if (codeContent.endsWith("\n")) {
+        codeContent = codeContent.slice(0, -1);
+      }
+
+      const escaped = codeContent
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      const index = codeBlocks.length;
+      codeBlocks.push(`<pre><code class="language-${finalLang}">${escaped}</code></pre>`);
+      return `§§§CB${index}§§§`;
+    }
+  );
 
   // 2. Extract inline code
   formatted = formatted.replace(/`([^`\n]+)`/g, (_, code) => {
@@ -120,24 +142,12 @@ import { InlineKeyboard } from "grammy";
 
 /**
  * بررسی اینکه آیا متن پاسخ نیازمند دکمه کپی است یا خیر:
- * ۱. بلوک کد چندخطی (```...```)
- * ۲. دستورات شل یا متن‌های مونو‌اسپیس (`...`)
- * ۳. متن‌های توضیحی و طولانی (بیش از ۴۰۰ کاراکتر)
+ * توجه: پیام‌های عادی مکالمه و گفتگو هرگز نباید دکمه کپی دریافت کنند.
+ * کدهای برنامه‌نویسی نیز از طریق کدهای نیتیو تلگرام (<pre><code class="language-...">) به صورت خودکار دکمه و هدر کپی دارند.
  */
 export function shouldAttachCopyButton(text?: string | null): boolean {
   if (!text || typeof text !== "string") return false;
-  const clean = text.trim();
-  if (!clean) return false;
-
-  // ۱. بررسی بلوک کد چندخطی
-  if (/```[\s\S]*?```/.test(clean)) return true;
-
-  // ۲. بررسی کدهای درون‌خطی، دستورات شل یا بلوک‌های مونو‌اسپیس
-  if (/`[^`]+`/.test(clean)) return true;
-
-  // ۳. بررسی متن‌های طولانی
-  if (clean.length > 400) return true;
-
+  // پیام‌های مکالمه عادی و پاسخ‌های معمول هرگز دکمه کپی شیشه‌ای دریافت نمی‌کنند
   return false;
 }
 

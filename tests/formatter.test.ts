@@ -33,6 +33,31 @@ describe("formatter utils", () => {
       expect(result).toContain("</code></pre>");
     });
 
+    it("should convert fenced code blocks with bash and escape HTML entities (<, >, &)", () => {
+      const md = "```bash\nif [ 1 < 2 ] && [ 2 > 1 ]; then\n  echo \"<success>&\"\nfi\n```";
+      const result = markdownToTelegramHtml(md);
+      expect(result).toContain('<pre><code class="language-bash">');
+      expect(result).toContain("if [ 1 &lt; 2 ] &amp;&amp; [ 2 &gt; 1 ]; then");
+      expect(result).toContain('echo "&lt;success&gt;&amp;"');
+      expect(result).toContain("</code></pre>");
+    });
+
+    it("should default language to 'text' when fenced code block has no language specified", () => {
+      const md = "```\nPlain text without language\nSecond line\n```";
+      const result = markdownToTelegramHtml(md);
+      expect(result).toContain('<pre><code class="language-text">');
+      expect(result).toContain("Plain text without language\nSecond line");
+      expect(result).toContain("</code></pre>");
+    });
+
+    it("should auto-close unclosed code block and render proper pre and code tags", () => {
+      const md = "```python\nprint('hello world')";
+      const result = markdownToTelegramHtml(md);
+      expect(result).toContain('<pre><code class="language-python">');
+      expect(result).toContain("print('hello world')");
+      expect(result).toContain("</code></pre>");
+    });
+
     it("should convert headers to bold", () => {
       expect(markdownToTelegramHtml("## Section Title")).toBe("<b>Section Title</b>");
     });

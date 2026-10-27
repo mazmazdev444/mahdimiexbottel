@@ -55,6 +55,16 @@ export function splitMessage(text: string, maxLen = 3800): string[] {
       remaining = "```\n" + remaining;
     }
 
+    // Preserve open HTML <pre><code class="language-..."> blocks across chunks
+    const openPres = (chunk.match(/<pre[^>]*>/gi) || []).length;
+    const closePres = (chunk.match(/<\/pre>/gi) || []).length;
+    if (openPres > closePres) {
+      const matchLang = chunk.match(/<pre><code(?:\s+class="language-([^"]*)")?>[\s\S]*?$/i);
+      const lang = matchLang && matchLang[1] ? matchLang[1] : "text";
+      chunk += "</code></pre>";
+      remaining = `<pre><code class="language-${lang}">` + remaining;
+    }
+
     chunks.push(chunk);
   }
 

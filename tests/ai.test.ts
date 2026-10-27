@@ -12,7 +12,7 @@ import {
 import { matchModelName } from "../src/index";
 import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicService";
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
-import { createCopyMarkdownKeyboard, shouldAttachCopyButton, getConditionalCopyKeyboard } from "../src/utils/formatter";
+import { markdownToTelegramHtml, createCopyMarkdownKeyboard, shouldAttachCopyButton, getConditionalCopyKeyboard } from "../src/utils/formatter";
 import { getChromiumExecutablePath } from "../src/tools/webTools";
 import { extractRepliedText, formatReplyContext } from "../src/utils/replyContext";
 import { buildStickerPrompt, buildAnimationPrompt } from "../src/handlers/sticker";
@@ -241,20 +241,10 @@ describe("ai service helpers", () => {
       expect(createCopyMarkdownKeyboard("   ")).toBeUndefined();
     });
 
-    it("shouldAttachCopyButton should return true for code blocks", () => {
-      const code = "در اینجا کد پایتون آمده است:\n```python\nprint('hello')\n```\nموفق باشید.";
-      expect(shouldAttachCopyButton(code)).toBe(true);
-    });
-
-    it("shouldAttachCopyButton should return true for inline code or shell commands", () => {
-      const shellCmd = "برای اجرا دستور `bun test` را بزنید.";
-      expect(shouldAttachCopyButton(shellCmd)).toBe(true);
-    });
-
-    it("shouldAttachCopyButton should return true for long-form text (> 400 chars)", () => {
-      const longText = "توضیحات جامع در مورد عملکرد سامانه و پردازش داده‌ها: ".repeat(15);
-      expect(longText.length).toBeGreaterThan(400);
-      expect(shouldAttachCopyButton(longText)).toBe(true);
+    it("shouldAttachCopyButton should return false for normal chat responses (including long text > 400 chars)", () => {
+      const longChat = "توضیحات جامع در مورد عملکرد سامانه و پردازش داده‌ها: ".repeat(15);
+      expect(longChat.length).toBeGreaterThan(400);
+      expect(shouldAttachCopyButton(longChat)).toBe(false);
     });
 
     it("shouldAttachCopyButton should return false for short chat, greetings, or banter", () => {
@@ -266,15 +256,28 @@ describe("ai service helpers", () => {
       expect(shouldAttachCopyButton(undefined)).toBe(false);
     });
 
-    it("getConditionalCopyKeyboard should attach button only when needed and return undefined otherwise", () => {
-      const codeMsg = "دستور: `git status`";
-      const kbWithCode = getConditionalCopyKeyboard(codeMsg);
-      expect(kbWithCode).toBeDefined();
-      expect(kbWithCode?.inline_keyboard[0][0].text).toBe("📋 کپی متن");
+    it("getConditionalCopyKeyboard should return undefined for normal chat responses so no buttons are attached", () => {
+      const longChat = "یک پاسخ گفتگوی طولانی بدون نیاز به دکمه اضافه کپی ".repeat(12);
+      expect(getConditionalCopyKeyboard(longChat)).toBeUndefined();
 
       const shortMsg = "سلام رئیس!";
-      const kbShort = getConditionalCopyKeyboard(shortMsg);
-      expect(kbShort).toBeUndefined();
+      expect(getConditionalCopyKeyboard(shortMsg)).toBeUndefined();
+    });
+
+    it("markdownToTelegramHtml should convert ```bash into <pre><code class=\"language-bash\"> with escaped entities", () => {
+      const md = "```bash\nif [ 1 < 2 ] && [ 3 > 2 ]; then echo 'ok'; fi\n```";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain('<pre><code class="language-bash">');
+      expect(html).toContain("&lt;");
+      expect(html).toContain("&gt;");
+      expect(html).toContain("&amp;&amp;");
+      expect(html).toContain("</code></pre>");
+    });
+
+    it("markdownToTelegramHtml should default ``` without lang to <pre><code class=\"language-text\">", () => {
+      const md = "```\njust plain text\n```";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain('<pre><code class="language-text">just plain text</code></pre>');
     });
   });
 
