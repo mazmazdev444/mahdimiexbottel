@@ -169,10 +169,10 @@ describe("ai service helpers", () => {
     });
   });
 
-  describe("mediaDownloader short URL cache & Spotify separation", () => {
-    it("should not treat Spotify as a generic media video URL", () => {
-      expect(isMediaUrl("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")).toBe(false);
-      expect(isMediaUrl("https://spotify.link/xyz")).toBe(false);
+  describe("mediaDownloader short URL cache & Spotify inclusion", () => {
+    it("should treat Spotify as a supported media URL", () => {
+      expect(isMediaUrl("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")).toBe(true);
+      expect(isMediaUrl("https://spotify.link/xyz")).toBe(true);
     });
 
     it("should treat YouTube and Instagram as media URLs", () => {

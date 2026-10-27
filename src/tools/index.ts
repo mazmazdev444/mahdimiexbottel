@@ -26,7 +26,17 @@ export interface ToolDefinition {
 }
 
 export const TOOLS_SCHEMA: ToolDefinition[] = [
-  ...(webToolsDeclaration as ToolDefinition[]),
+  {
+    name: "take_web_screenshot",
+    description: "گرفتن اسکرین‌شات از صفحه وب و ارسال مستقیم آن به کاربر در تلگرام بدون درگیر کردن رم سرور",
+    parameters: {
+      type: "OBJECT",
+      properties: {
+        url: { type: "STRING", description: "آدرس کامل صفحه وب" },
+      },
+      required: ["url"],
+    },
+  },
   {
     name: "eval_math",
     description: "محاسبه عبارات ریاضی و مهندسی",
@@ -39,23 +49,12 @@ export const TOOLS_SCHEMA: ToolDefinition[] = [
     },
   },
   {
-    name: "fetch_url",
-    description: "استخراج متن و محتوای یک لینک اینترنتی",
+    name: "read_web_link",
+    description: "استخراج، مطالعه و خلاصه کردن متن و محتوای هر صفحه وب یا لینک اینترنتی بدون استایل و تبلیغات",
     parameters: {
       type: "OBJECT",
       properties: {
-        url: { type: "STRING", description: "آدرس کامل صفحه وب" },
-      },
-      required: ["url"],
-    },
-  },
-  {
-    name: "fetch_page",
-    description: "باز کردن لینک‌های وب و استخراج متن اصلی صفحه بدون بارگذاری تبلیغات و استایل‌ها",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        url: { type: "STRING", description: "آدرس کامل صفحه وب (شامل http:// یا https://)" },
+        url: { type: "STRING", description: "آدرس کامل صفحه وب با http یا https" },
       },
       required: ["url"],
     },
@@ -219,25 +218,21 @@ export async function executeTool(
           return typeof res === "string" ? res : JSON.stringify(res);
         });
       }
-      case "fetch_url": {
-        const url = args?.url || "";
-        return await runToolWithLogger("FETCH_URL", url, async () => {
-          const res = await executeCustomTool("fetch_url", args);
+      case "fetch_url":
+      case "fetch_page":
+      case "fetch_web_page":
+      case "read_web_link": {
+        const rawUrl = String(args?.url || args?.link || "").trim();
+        if (!rawUrl) return JSON.stringify({ ok: false, error: "آدرس وب‌سایت مشخص نشده است." });
+        return await runToolWithLogger("READ_WEB_LINK", rawUrl, async () => {
+          const res = await executeFetchPage(rawUrl);
           return typeof res === "string" ? res : JSON.stringify(res);
         });
       }
-      case "fetch_web_page":
       case "take_web_screenshot": {
         return await runToolWithLogger(`WEB_${toolName.toUpperCase()}`, JSON.stringify(args), async () => {
           const res = await executeWebTool(ctx, toolName, args);
           return typeof res === "string" ? res : JSON.stringify(res);
-        });
-      }
-      case "fetch_page": {
-        if (!args.url) return JSON.stringify({ ok: false, error: "آدرس وب‌سایت مشخص نشده است." });
-        return await runToolWithLogger("FETCH_PAGE", args.url, async () => {
-          const res = await executeFetchPage(args.url);
-          return JSON.stringify(res);
         });
       }
       case "web_search": {
@@ -276,10 +271,6 @@ export async function executeTool(
       case "query_benchmark": {
         const query = args.query || "all";
         return await runToolWithLogger("BENCHMARK", query, () => queryBenchmark(userId, query));
-      }
-      case "read_web_link": {
-        if (!args.url) return "خطا: آدرس لینک مشخص نشده است.";
-        return await runToolWithLogger("LINK_READER", args.url, () => scrapeWebPageContent(args.url));
       }
       case "manage_tasks": {
         return await runToolWithLogger("TASKS", args.action || "list", async () => {

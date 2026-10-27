@@ -129,10 +129,14 @@ export function setupTrackingMiddleware(bot: Bot) {
     const status = ctx.myChatMember.new_chat_member.status;
     if (status === "member" || status === "administrator") {
       try {
-        db.prepare("INSERT OR REPLACE INTO chats (chat_id, title) VALUES (?, ?)").run(ctx.chat.id, ctx.chat.title || "گروه");
+        const grp = db.prepare("SELECT status FROM groups WHERE chat_id = ?").get(ctx.chat.id) as { status: string } | undefined;
+        if (!grp || grp.status === "approved" || grp.status === "pending") {
+          db.prepare("INSERT OR REPLACE INTO chats (chat_id, title) VALUES (?, ?)").run(ctx.chat.id, ctx.chat.title || "گروه");
+        }
       } catch {}
     } else if (status === "left" || status === "kicked") {
       try {
+        deleteGroup(ctx.chat.id);
         db.prepare("DELETE FROM chats WHERE chat_id = ?").run(ctx.chat.id);
       } catch {}
     }

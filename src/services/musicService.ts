@@ -27,7 +27,7 @@ export async function resolveSpotifyTrack(
   url: string,
   signal?: AbortSignal
 ): Promise<SpotifyTrackInfo | null> {
-  const getSignal = (ms = 3500) => {
+  const getSignal = (ms = 6000) => {
     try {
       return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
     } catch {
@@ -38,7 +38,7 @@ export async function resolveSpotifyTrack(
   try {
     let resolvedUrl = url.trim();
     if (resolvedUrl.includes("spotify.link")) {
-      const redirectRes = await fetch(resolvedUrl, { redirect: "follow", signal: getSignal(4000) }).catch(() => null);
+      const redirectRes = await fetch(resolvedUrl, { redirect: "follow", signal: getSignal(6000) }).catch(() => null);
       if (redirectRes?.url) resolvedUrl = redirectRes.url;
     }
 
@@ -54,7 +54,7 @@ export async function resolveSpotifyTrack(
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           },
-          signal: getSignal(3500),
+          signal: getSignal(6000),
         });
 
         if (embedRes.ok) {
@@ -90,7 +90,7 @@ export async function resolveSpotifyTrack(
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
-        signal: getSignal(3500),
+        signal: getSignal(6000),
       });
 
       if (pageRes.ok) {
@@ -134,7 +134,7 @@ export async function resolveSpotifyTrack(
 
     // روش ۳: fallback به oEmbed رسمی
     try {
-      const oembedRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(resolvedUrl), { signal: getSignal(3500) });
+      const oembedRes = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent(resolvedUrl), { signal: getSignal(6000) });
       if (oembedRes.ok) {
         const oembedData = await oembedRes.json();
         if (oembedData && oembedData.title) {
@@ -220,7 +220,11 @@ export async function downloadAudio(queryOrUrl: string, signal?: AbortSignal): P
   // Spotify streams are DRM-protected, so we search YouTube (ytsearch1) using the resolved track name
   // Non-Spotify URLs (e.g. SoundCloud, direct audio links) are passed directly
   // Plain queries (song names) are searched via ytsearch1
-  const target = isUrl && !isSpotify ? cleanInput : `ytsearch1:${query}`;
+  const target = isUrl && !isSpotify
+    ? cleanInput
+    : isSpotify
+    ? `ytsearch1:${detectedPerformer ? `${detectedPerformer} ` : ""}${detectedTitle || query} audio`.trim()
+    : `ytsearch1:${query}`;
   const id = `mazmaz_audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const outTemplate = path.join("/tmp", `${id}.%(ext)s`);
 

@@ -28,6 +28,23 @@ describe("resilience service", () => {
       markKeyCooldown(key, 5000);
       expect(isKeyAvailable(key)).toBe(false);
     });
+
+    it("should default to 60,000ms (60 seconds) cooldown", () => {
+      const key = "test_key_default_60s";
+      markKeyCooldown(key);
+      expect(isKeyAvailable(key)).toBe(false);
+    });
+
+    it("getActiveGeminiKey should prioritize available keys and skip cooling down keys", () => {
+      const origKeys = [...CONFIG.GEMINI_API_KEYS];
+      CONFIG.GEMINI_API_KEYS = ["KeyCoolingDown111", "KeyAvailable222"];
+      markKeyCooldown("KeyCoolingDown111", 60000);
+
+      const picked = getActiveGeminiKey();
+      expect(picked).toBe("KeyAvailable222");
+
+      CONFIG.GEMINI_API_KEYS = origKeys;
+    });
   });
 
   describe("withRetry", () => {

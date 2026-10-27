@@ -1,6 +1,7 @@
 import { CONFIG } from "../config";
 import path from "path";
 import fs from "fs";
+import { resolveSpotifyTrack } from "./musicService";
 
 const mediaUrlCache = new Map<string, { url: string; createdAt: number }>();
 
@@ -38,6 +39,8 @@ export function isMediaUrl(text: string): boolean {
     "twitter.com",
     "x.com",
     "soundcloud.com",
+    "spotify.com",
+    "spotify.link",
   ];
   return keywords.some((k) => text.toLowerCase().includes(k));
 }
@@ -46,6 +49,23 @@ export async function downloadMedia(
   url: string,
   audioOnly = false
 ): Promise<{ filePath: string | null; error?: string }> {
+  let downloadTarget = url;
+  const isSpotify = url.toLowerCase().includes("spotify.com") || url.toLowerCase().includes("spotify.link");
+
+  if (isSpotify) {
+    audioOnly = true;
+    try {
+      const spotifyInfo = await resolveSpotifyTrack(url);
+      if (spotifyInfo) {
+        const artist = spotifyInfo.artist || "";
+        const title = spotifyInfo.title || "";
+        downloadTarget = `ytsearch1:${artist} ${title} audio`.trim();
+      }
+    } catch (e: any) {
+      console.warn("Spotify resolution in downloadMedia failed:", e?.message);
+    }
+  }
+
   const id = Math.random().toString(36).substring(2, 9);
   const outTemplate = path.join(CONFIG.DOWNLOADS_DIR, `${id}_%(title).40s.%(ext)s`);
 
@@ -70,9 +90,9 @@ export async function downloadMedia(
   }
 
   if (audioOnly) {
-    args.push("-x", "--audio-format", "mp3", "--audio-quality", "192K", "-o", outTemplate, url);
+    args.push("-x", "--audio-format", "mp3", "--audio-quality", "192K", "-o", outTemplate, downloadTarget);
   } else {
-    args.push("-f", "b[filesize<49M]/best[ext=mp4]/best", "--merge-output-format", "mp4", "-o", outTemplate, url);
+    args.push("-f", "b[filesize<49M]/best[ext=mp4]/best", "--merge-output-format", "mp4", "-o", outTemplate, downloadTarget);
   }
 
   try {

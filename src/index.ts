@@ -1992,12 +1992,10 @@ bot.callbackQuery(/^grp_sync:(\-?\d+)$/, async (ctx) => {
   if (!CONFIG.ADMIN_IDS.includes(ctx.from!.id)) return;
   const chatId = parseInt(ctx.match[1], 10);
   try {
-    const chat = (await ctx.api.getChat(chatId)) as any;
-    const title = chat.title || "گروه";
-    registerOrUpdateGroup(chatId, title, chat.type);
-
-    let role = "عضو";
     let isLeftOrKicked = false;
+    let role = "عضو";
+
+    // 1. ابتدا وضعیت عضویت ربات را از تلگرام بررسی می‌کنیم
     try {
       const member = await ctx.api.getChatMember(chatId, ctx.me.id);
       if (member.status === "left" || member.status === "kicked") {
@@ -2005,18 +2003,64 @@ bot.callbackQuery(/^grp_sync:(\-?\d+)$/, async (ctx) => {
       } else {
         role = member.status === "administrator" ? "👑 مدیر (Admin)" : member.status === "member" ? "👤 عضو عادی (Member)" : member.status;
       }
-    } catch {}
+    } catch (memberErr: any) {
+      const msg = String(memberErr?.message || "").toLowerCase();
+      const code = memberErr?.error_code || memberErr?.status;
+      if (
+        code === 400 ||
+        code === 403 ||
+        msg.includes("kicked") ||
+        msg.includes("left") ||
+        msg.includes("chat not found") ||
+        msg.includes("forbidden")
+      ) {
+        isLeftOrKicked = true;
+      } else {
+        throw memberErr;
+      }
+    }
 
+    // 2. اگر ربات لفت داده یا اخراج شده، فوراً گروه شبح از دیتابیس حذف و پنل آپدیت می‌شود
     if (isLeftOrKicked) {
       deleteGroup(chatId);
       const kb = new InlineKeyboard().text("🔙 بازگشت به لیست گروه‌ها", "admin_groups");
       await ctx.editMessageText(
-        `🚪 <b>ربات دیگر در گروه «${escapeHtml(title)}» حضور ندارد (وضعیت left/kicked).</b>\nاین گروه از لیست دیتابیس پاک شد.`,
+        `🚪 <b>ربات دیگر در این گروه حضور ندارد (وضعیت left/kicked/chat not found).</b>\nاین گروه با موفقیت از لیست دیتابیس پاک شد.`,
         { reply_markup: kb, parse_mode: "HTML" }
       ).catch(() => {});
       await ctx.answerCallbackQuery({ text: "ربات از گروه خارج شده بود؛ رکورد گروه حذف گردید." });
       return;
     }
+
+    // 3. دریافت اطلاعات جدید گروه و به‌روزرسانی در دیتابیس
+    let chat: any;
+    try {
+      chat = await ctx.api.getChat(chatId);
+    } catch (chatErr: any) {
+      const msg = String(chatErr?.message || "").toLowerCase();
+      const code = chatErr?.error_code || chatErr?.status;
+      if (
+        code === 400 ||
+        code === 403 ||
+        msg.includes("kicked") ||
+        msg.includes("left") ||
+        msg.includes("chat not found") ||
+        msg.includes("forbidden")
+      ) {
+        deleteGroup(chatId);
+        const kb = new InlineKeyboard().text("🔙 بازگشت به لیست گروه‌ها", "admin_groups");
+        await ctx.editMessageText(
+          `🚪 <b>گروه در تلگرام یافت نشد یا دسترسی مسدود است (400/403).</b>\nاین گروه با موفقیت از لیست دیتابیس پاک شد.`,
+          { reply_markup: kb, parse_mode: "HTML" }
+        ).catch(() => {});
+        await ctx.answerCallbackQuery({ text: "دسترسی به گروه وجود نداشت؛ گروه حذف گردید." });
+        return;
+      }
+      throw chatErr;
+    }
+
+    const title = chat.title || "گروه";
+    registerOrUpdateGroup(chatId, title, chat.type);
 
     const g = getGroupById(chatId);
     const statusText = g?.status === "approved" ? "✅ تایید شده و فعال" : g?.status === "pending" ? "⏳ در انتظار تایید" : "🚪 خارج شده";
