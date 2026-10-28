@@ -12,7 +12,12 @@ import { CONFIG, updateGeminiApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
 import { markdownToTelegramHtml, escapeHtml } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
-import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
+import {
+  formatReplyContext,
+  downloadTelegramPhotoAsBase64,
+  extractRepliedMessageContent,
+  stripLeadingWakeWord,
+} from "../utils/replyContext";
 import {
   isBugReport,
   isFeedbackOrCriticism,
@@ -164,17 +169,56 @@ export async function handleTextMessage(ctx: Context) {
   // ارسال فوری اکشن تایپینگ بالای چت تلگرام
   ctx.replyWithChatAction("typing").catch(() => {});
 
+  const replyMsg = ctx.message?.reply_to_message;
+  const quote = ctx.message?.quote;
+
+  // ۱. بررسی پیام ریپلای‌شده و نقل‌قول قبل از پاسخ با احوال‌پرسی کلمه بیدارباش
+  const repliedInfo = extractRepliedMessageContent(replyMsg, quote);
+  let repliedText = repliedInfo.repliedText;
+  const hasRepliedPhoto = repliedInfo.hasRepliedPhoto;
+  const hasRepliedMedia = repliedInfo.hasRepliedMedia;
+  const photoFileId = repliedInfo.photoFileId;
+
   // تمیز کردن پرامپت با حذف خطاب مستقیم و نام ربات
   let cleanText = text
     .replace(new RegExp(`@${ctx.me.username}\\b`, "gi"), "")
     .replace(/^(?:(?:سلام|درود|هی|الو|چطوری|ey|hi|hello)\s+)?(?:مزمز|mazmaz)[،,:.!؟?\s]*/i, "")
     .replace(/مزمزم?|mazmaz/gi, "")
-    .replace(/^[\s،,:!؟?]+|[\s،,:!؟?]+$/g, "")
+    .replace(/^[\s،,:!؟?]+/g, "")
     .trim();
   const cleanLower = cleanText.toLowerCase();
 
-  // اگر کاربر فقط اسم ربات را صدا زده بود (مثلاً «مزمز» یا «سلام مزمز»)
-  if (!cleanText || cleanLower === "سلام" || cleanLower === "درود") {
+  let isWakeWordOnlyReply = false;
+
+  // ۲. مدیریت ریپلای فقط با کلمه بیدارباش (Wake-Word-Only Replies)
+  if (!cleanText) {
+    if (replyMsg) {
+      if (repliedText) {
+        // الف) اگر متن ریپلای وجود دارد: حذف کلمه بیدارباش ابتدایی و استفاده به عنوان پرامپت اصلی
+        const strippedReplied = stripLeadingWakeWord(repliedText, ctx.me.username);
+        if (strippedReplied) {
+          cleanText = strippedReplied;
+          isWakeWordOnlyReply = true;
+        }
+      } else if (hasRepliedPhoto) {
+        // ب) اگر عکس ریپلای‌شده بدون متن است: پرامپت پیش‌فرض تحلیل تصویر
+        cleanText = "این تصویر را دقیق تحلیل و بررسی کن";
+        isWakeWordOnlyReply = true;
+      }
+    }
+
+    // ج) فقط در صورتی احوال‌پرسی هاردکدشده ارسال می‌شود که هم متن تمیز کاربر خالی باشد و هم ریپلای یا مدیایی نباشد
+    if (!cleanText && !hasRepliedMedia) {
+      const greetings = [
+        "جانم داداش؟ گوشم کاملاً با توئه، بگو ببینم چی می‌خوای! 👂😎",
+        "جون دلم رفیق! مزمز اینجاست، امر بفرما 🚀",
+        "سلام و ارادت! بگو ببینم چه کار فنی یا سوالی داری تا با هم ردیفش کنیم؟ ⚡",
+      ];
+      const picked = greetings[Math.floor(Math.random() * greetings.length)];
+      await ctx.reply(picked, replyOpts);
+      return;
+    }
+  } else if (!replyMsg && (cleanLower === "سلام" || cleanLower === "درود")) {
     const greetings = [
       "جانم داداش؟ گوشم کاملاً با توئه، بگو ببینم چی می‌خوای! 👂😎",
       "جون دلم رفیق! مزمز اینجاست، امر بفرما 🚀",
@@ -263,7 +307,6 @@ export async function handleTextMessage(ctx: Context) {
     }
   }
 
-  const replyMsg = ctx.message?.reply_to_message;
   const replyUser = replyMsg?.from;
 
   // دستورات مستقیم و پرسرعت مدیریتی ادمین (مهدی) در گروه روی پیام‌های ریپلای‌شده
@@ -754,8 +797,17 @@ export async function handleTextMessage(ctx: Context) {
   }
 
   const currentText = cleanText || text;
-  const replyContextData = formatReplyContext(currentText, replyMsg);
-  const hasRepliedPhoto = Boolean(replyContextData.photoFileId);
+
+  let promptToSend: string;
+  if (isWakeWordOnlyReply) {
+    // ریپلای فقط با کلمه بیدارباش: متن پیام ریپلای‌شده یا پرامپت تحلیل تصویر مستقیماً استفاده می‌شود
+    promptToSend = currentText;
+  } else if (replyMsg && repliedText) {
+    // ۳. ریپلای همراه با متن اضافی کاربر: فرمت استاندارد درخواستی
+    promptToSend = `[پیام ریپلای‌شده]: "${repliedText}"\n\n[درخواست کاربر]: ${currentText}`;
+  } else {
+    promptToSend = currentText;
+  }
 
   const isForwarded = Boolean(
     ctx.message?.forward_origin ||
@@ -770,7 +822,7 @@ export async function handleTextMessage(ctx: Context) {
   let isDone = false;
   const statusText = hasRepliedPhoto
     ? "👁️‍🗨️ <i>در حال مشاهده تصویر ریپلای‌شده و تدوین پاسخ... ⏳</i>"
-    : isForwarded
+    : isForwarded && !replyMsg
     ? "📖 <i>در حال خواندن و تحلیل پیام فوروارد شده... ⏳</i>"
     : "💭 <i>در حال تفکر و تدوین پاسخ هوشمند... ⏳</i>";
 
@@ -807,11 +859,11 @@ export async function handleTextMessage(ctx: Context) {
       }
     }, 1000);
 
-    // دانلود عکس در صورت ریپلای روی تصویر
+    // دانلود عکس در صورت وجود عکس در پیام ریپلای‌شده
     let imageBase64: string | undefined = undefined;
-    if (replyContextData.photoFileId) {
+    if (photoFileId) {
       try {
-        const b64 = await downloadTelegramPhotoAsBase64(replyContextData.photoFileId, ctx.api);
+        const b64 = await downloadTelegramPhotoAsBase64(photoFileId, ctx.api);
         if (b64) {
           imageBase64 = b64;
         }
@@ -820,7 +872,6 @@ export async function handleTextMessage(ctx: Context) {
       }
     }
 
-    let promptToSend = replyContextData.prompt;
     if (!replyMsg && isForwarded) {
       let fwdSource = "";
       const fo = (ctx.message as any)?.forward_origin;

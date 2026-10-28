@@ -4,7 +4,10 @@ import { CONFIG } from "../config";
 import { markdownToTelegramHtml } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
-import { formatReplyContext, downloadTelegramPhotoAsBase64 } from "../utils/replyContext";
+import {
+  downloadTelegramPhotoAsBase64,
+  extractRepliedMessageContent,
+} from "../utils/replyContext";
 
 export async function handlePhotoMessage(ctx: Context) {
   const photos = ctx.message?.photo;
@@ -50,10 +53,23 @@ export async function handlePhotoMessage(ctx: Context) {
     }
   }
 
-  const rawCaption = ctx.message?.caption || "لطفاً این تصویر را با دقت و جزئیات کامل تحلیل و توضیح بده.";
+  const rawCaption = ctx.message?.caption?.trim() || "";
+  const cleanCaption = rawCaption
+    .replace(new RegExp(`@${ctx.me.username}\\b`, "gi"), "")
+    .replace(/^(?:(?:سلام|درود|هی|الو|چطوری|ey|hi|hello)\s+)?(?:مزمز|mazmaz)[،,:.!؟?\s]*/i, "")
+    .replace(/مزمزم?|mazmaz/gi, "")
+    .replace(/^[\s،,:!؟?]+/g, "")
+    .trim();
+  const finalCaption = cleanCaption || "این تصویر را دقیق تحلیل و بررسی کن";
+
   const replyMsg = ctx.message?.reply_to_message;
-  const replyContextData = formatReplyContext(rawCaption, replyMsg);
-  const caption = replyContextData.prompt;
+  const quote = ctx.message?.quote;
+  const repliedInfo = extractRepliedMessageContent(replyMsg, quote);
+
+  let caption = finalCaption;
+  if (replyMsg && repliedInfo.repliedText) {
+    caption = `[پیام ریپلای‌شده]: "${repliedInfo.repliedText}"\n\n[درخواست کاربر]: ${finalCaption}`;
+  }
 
   const statusMsg = await ctx.reply("👁️‍🗨️ <b>در حال دیدن و تحلیل هوشمند تصویر با مزمز... ⏳</b>", {
     ...replyOpts,

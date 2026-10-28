@@ -7,10 +7,129 @@ export interface ReplyContextResult {
   photoFileId: string | null;
 }
 
+export interface RepliedMessageContent {
+  repliedText: string;
+  hasRepliedPhoto: boolean;
+  hasRepliedSticker: boolean;
+  hasRepliedAnimation: boolean;
+  hasRepliedMedia: boolean;
+  photoFileId: string | null;
+}
+
+/**
+ * استخراج تمام لینک‌ها از entities یا caption_entities پیام یا نقل‌قول (quote)
+ */
+export function extractUrlsFromMessage(replyMsg: any, quote?: any): string[] {
+  const urls: string[] = [];
+  const addUrl = (u: string) => {
+    if (u && !urls.includes(u)) urls.push(u);
+  };
+
+  const processEntities = (entities: any[] | undefined, sourceText: string) => {
+    if (!entities || !Array.isArray(entities)) return;
+    for (const ent of entities) {
+      if (ent.type === "text_link" && ent.url) {
+        addUrl(ent.url);
+      } else if (ent.type === "url" && sourceText) {
+        const u = sourceText.slice(ent.offset, ent.offset + ent.length).trim();
+        if (u) addUrl(u);
+      }
+    }
+  };
+
+  if (quote) {
+    processEntities(quote.entities, quote.text || "");
+  }
+  if (replyMsg) {
+    processEntities(replyMsg.entities, replyMsg.text || "");
+    processEntities(replyMsg.caption_entities, replyMsg.caption || "");
+  }
+
+  return urls;
+}
+
+/**
+ * حذف کلمه بیدارباش ابتدایی (مزمز / mazmaz / @bot) از پیام
+ */
+export function stripLeadingWakeWord(text: string, botUsername?: string): string {
+  if (!text) return "";
+  let cleaned = text.trim();
+  if (botUsername) {
+    cleaned = cleaned.replace(new RegExp(`^@${botUsername}\\b[،,:.!؟?\\s]*`, "gi"), "").trim();
+  }
+  cleaned = cleaned
+    .replace(/^(?:(?:سلام|درود|هی|الو|چطوری|ey|hi|hello)\s+)?(?:مزمز|mazmaz)[،,:.!؟?\s]*/i, "")
+    .replace(/^[\s،,:!؟?]+/g, "")
+    .trim();
+  return cleaned;
+}
+
+/**
+ * استخراج جامع محتوای پیام ریپلای‌شده، نقل‌قول (quote)، لینک‌ها و رسانه‌ها
+ */
+export function extractRepliedMessageContent(replyMsg: any, quote?: any): RepliedMessageContent {
+  if (!replyMsg && !quote) {
+    return {
+      repliedText: "",
+      hasRepliedPhoto: false,
+      hasRepliedSticker: false,
+      hasRepliedAnimation: false,
+      hasRepliedMedia: false,
+      photoFileId: null,
+    };
+  }
+
+  // ۱. متن مستقیم یا نقل‌قول: اولویت با quote.text، سپس reply.text، سپس reply.caption
+  let text = (quote?.text || replyMsg?.text || replyMsg?.caption || "").trim();
+
+  // ۲. استخراج لینک‌ها از entities و الحاق لینک‌های پنهان (مانند text_link) در صورت عدم وجود
+  const urls = extractUrlsFromMessage(replyMsg, quote);
+  if (urls.length > 0) {
+    const missingUrls = urls.filter((u) => !text.includes(u));
+    if (missingUrls.length > 0) {
+      text = text ? `${text}\n${missingUrls.join("\n")}` : missingUrls.join("\n");
+    }
+  }
+
+  // ۳. بررسی رسانه‌ها (عکس، استیکر، گیف/انیمیشن)
+  const hasRepliedPhoto = Boolean(replyMsg?.photo && Array.isArray(replyMsg.photo) && replyMsg.photo.length > 0);
+  const hasRepliedSticker = Boolean(replyMsg?.sticker);
+  const hasRepliedAnimation = Boolean(replyMsg?.animation);
+  const hasRepliedMedia = hasRepliedPhoto || hasRepliedSticker || hasRepliedAnimation;
+
+  let photoFileId: string | null = null;
+  if (hasRepliedPhoto) {
+    const bestPhoto = replyMsg.photo[replyMsg.photo.length - 1];
+    photoFileId = bestPhoto?.file_id || null;
+  }
+
+  // در صورت نبود متن، استخراج ایموجی استیکر یا نشانگر انیمیشن
+  if (!text) {
+    if (hasRepliedSticker) {
+      const emoji = replyMsg.sticker?.emoji ? ` ${replyMsg.sticker.emoji}` : "";
+      text = `[استیکر${emoji}]`.trim();
+    } else if (hasRepliedAnimation) {
+      text = "[گیف انیمیشن]";
+    }
+  }
+
+  return {
+    repliedText: text,
+    hasRepliedPhoto,
+    hasRepliedSticker,
+    hasRepliedAnimation,
+    hasRepliedMedia,
+    photoFileId,
+  };
+}
+
 /**
  * استخراج متن، کپشن، اموجی استیکر یا مشخصات گیف از پیام ریپلای‌شده
  */
-export function extractRepliedText(replyMsg: any): string | null {
+export function extractRepliedText(replyMsg: any, quote?: any): string | null {
+  if (quote?.text && typeof quote.text === "string" && quote.text.trim()) {
+    return quote.text.trim();
+  }
   if (!replyMsg) return null;
 
   // ۱. متن مستقیم
