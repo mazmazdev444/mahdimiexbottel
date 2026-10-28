@@ -32,6 +32,7 @@
 
 ### 🧠 1. Multimodal Conversational AI & Vision
 - **High-Speed Gemini Integration:** Powered by default by Google's latest Flash series models for ultra-low latency and natural multilingual understanding (Persian, English, etc.).
+- **Live Streaming Responses:** Real-time token streaming in private chats for an immediate, fluid response experience with automatic Markdown formatting.
 - **Multimodal Visual Intelligence (Vision):** Direct photo uploads and reply-to-photo analysis, supporting OCR text extraction, visual reasoning, chart understanding, and scene explanation.
 - **Deep Telegram Context Awareness:** Seamlessly digests replied messages, native Telegram quotes (API 7.0+), channel/group forward headers, and sticker emojis.
 - **Smart Wake-Word & Group Mentions:** Reacts when directly invoked ("مزمز", @bot username, or direct reply), maintaining respectful silence during unrelated group conversations.
@@ -63,6 +64,7 @@ The model dynamically decides when to invoke built-in real-time tools:
 ---
 
 ### 👥 4. Group Management & Moderation
+- **Speaker Attribution & Identity Disambiguation:** Resolves user display names (`first_name` > `username` > fallback "کاربر"), tags current senders, formats reply quotes, and isolates message history turns to prevent speaker identity confusion in group conversations.
 - **Group Digest:** AI-generated summary synthesizing the last 50 group messages into topics, questions, and action items.
 - **Admin Moderation Commands:**
   - Permanent ban (`/ban` or natural language command).
@@ -180,6 +182,20 @@ bun run start
 - **Sandboxed Execution:** Mathematical evaluations run in a strictly isolated context without access to file systems or OS APIs.
 - **Credential Hygiene:** No secrets, tokens, private endpoints, or admin identifiers are embedded in the codebase. All sensitive data is injected via environment variables.
 - **Role-Based Access Control:** Administrative features and moderation tools are restricted exclusively to IDs defined in `ADMIN_IDS`.
+
+---
+
+## 💬 Support & Community
+
+If you have questions, encounter any issues, or want to contribute to the project, feel free to reach out through any of our official channels:
+
+| Channel | Contact / Link |
+| :--- | :--- |
+| 📧 **Support Email** | [mazmaz.miex@gmail.com](mailto:mazmaz.miex@gmail.com) |
+| 🤖 **Telegram Bot** | [@mazmazAgentBot](https://t.me/mazmazAgentBot) |
+| 💬 **Telegram Contact** | [@mmahdiz44](https://t.me/mmahdiz44) |
+| 🐦 **Twitter / X** | [@MahdiMiex](https://x.com/MahdiMiex) |
+| 🐙 **GitHub Issues** | [Submit an Issue](https://github.com/MahdiMiex/mazmaz_bot_ts/issues) |
 
 ---
 

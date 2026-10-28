@@ -32,6 +32,7 @@
 
 ### 🧠 1. 多模态对话与计算机视觉 (Multimodal AI & Vision)
 - **Gemini 高速模型集成：** 默认采用 Google Flash 系列模型，实现极低延迟的高质量多语言问答。
+- **私聊实时流式输出 (Live Streaming)：** 在私聊中支持逐字流式打印，带来流畅自然的即时打字机交互体验。
 - **图像多模态视觉分析 (Vision)：** 支持直接发送图片或回复消息中的图片，进行 OCR 文字提取、图表解析及场景分析。
 - **Telegram 上下文深度解析：** 智能识别回复（Reply）、引用（Quote）、频道/社群转发来源及表情包含义。
 - **唤醒词机制 (Wake-Word)：** 在群聊中仅在被唤醒（“مزمز”、@用户名或直接回复）时响应，避免无谓刷屏。
@@ -62,6 +63,7 @@
 ---
 
 ### 👥 4. 群组智能管理与审核 (Group Management & Moderation)
+- **发言人精准识别与身份消歧 (Speaker Attribution)：** 智能优先使用用户自然显示名（`first_name` > `username` > “کاربر”），精准标注发言者元数据与回复引用，杜绝群成员身份混淆。
 - **群聊摘要生成 (Group Digest)：** 一键提炼社群最近 50 条消息的主题、提问与决策要点。
 - **管理员便捷指令：**
   - 封禁成员 (`/ban` 或自然语言指令)。
@@ -179,6 +181,20 @@ bun run start
 - **计算沙箱隔离：** 数学公式计算在受限环境中执行，禁止访问文件系统或网络系统调用。
 - **凭证脱敏与保护：** 生产环境敏感凭证严禁硬编码至仓库，全部通过环境变量动态注入。
 - **细粒度权限控制：** 社群管理及系统配置指令严格受限至 `ADMIN_IDS` 所包含的用户。
+
+---
+
+## 💬 技术支持与社区交流 (Support & Contact)
+
+如果您在使用 MazMaz 过程中遇到任何问题、有任何疑问或希望参与贡献，欢迎通过以下渠道与我们联系：
+
+| 渠道 | 链接 / 联系方式 |
+| :--- | :--- |
+| 📧 **技术支持邮箱** | [mazmaz.miex@gmail.com](mailto:mazmaz.miex@gmail.com) |
+| 🤖 **Telegram 机器人** | [@mazmazAgentBot](https://t.me/mazmazAgentBot) |
+| 💬 **Telegram 开发者** | [@mmahdiz44](https://t.me/mmahdiz44) |
+| 🐦 **Twitter / X 主页** | [@MahdiMiex](https://x.com/MahdiMiex) |
+| 🐙 **GitHub Issues** | [提交反馈与建议](https://github.com/MahdiMiex/mazmaz_bot_ts/issues) |
 
 ---
 
