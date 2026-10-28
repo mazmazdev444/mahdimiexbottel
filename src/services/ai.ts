@@ -1,8 +1,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { getChatHistory, saveChatMessage, clearChatHistory, getSetting, getApprovedRules } from "../database";
-import { CONFIG } from "../config";
-import { getActiveGeminiKey, markKeyCooldown, markKeyDead, isKeyDead, maskApiKey, isKeyAvailable } from "./resilience";
+import { CONFIG, sanitizeApiKey } from "../config";
+import {
+  getActiveGeminiKey,
+  markKeyCooldown,
+  markKeyDead,
+  isKeyDead,
+  maskApiKey,
+  isKeyAvailable,
+  isApiKeyError,
+  sanitizeErrorMessage,
+} from "./resilience";
 import { getWeather, extractWeatherIntent } from "./weather";
 import { executeTool } from "../tools/index";
 import { webToolsDeclaration } from "../tools/webTools";
@@ -186,10 +195,11 @@ export function getModelCandidateChain(): string[] {
 }
 
 export async function checkAvailableGeminiModels(apiKey: string): Promise<void> {
-  if (!apiKey) return;
+  const cleanKey = sanitizeApiKey(apiKey);
+  if (!cleanKey) return;
   try {
     const checkAi = new GoogleGenAI({
-      apiKey,
+      apiKey: cleanKey,
       // @ts-ignore
       httpOptions: agent ? { agent } : undefined,
     });
@@ -211,12 +221,19 @@ export async function checkAvailableGeminiModels(apiKey: string): Promise<void> 
     const res = getResolvedActiveModel();
     console.log(`🤖 [GEMINI] Active model resolved: "${res.model}" (Source: ${res.source})`);
   } catch (err: any) {
-    console.warn(`⚠️ [GEMINI] Could not fetch models.list at startup: ${err?.message || err}`);
+    if (isApiKeyError(err)) {
+      markKeyDead(cleanKey);
+    }
+    const cleanErr = sanitizeErrorMessage(err?.message || err, cleanKey);
+    console.warn(`⚠️ [GEMINI] Could not fetch models.list at startup: ${cleanErr}`);
   }
 }
 
 export async function testGeminiKey(apiKey: string): Promise<{ ok: boolean; message: string }> {
-  const cleanKey = apiKey.trim();
+  const cleanKey = sanitizeApiKey(apiKey);
+  if (!cleanKey) {
+    return { ok: false, message: "فرمت کلید هوش مصنوعی نامعتبر است (کاراکترهای غیرمجاز، خط شکسته، کوتیشن یا خالی بودن)." };
+  }
   const testAi = new GoogleGenAI({
     apiKey: cleanKey,
     // @ts-ignore
@@ -238,6 +255,11 @@ export async function testGeminiKey(apiKey: string): Promise<{ ok: boolean; mess
       }
     } catch (e: any) {
       lastError = e;
+      if (isApiKeyError(e)) {
+        markKeyDead(cleanKey);
+        const cleanErr = sanitizeErrorMessage(e?.message || e, cleanKey);
+        return { ok: false, message: `کلید نامعتبر یا دارای خطای هدر است: ${cleanErr}` };
+      }
       const status = e?.status || e?.error?.code;
       // 503 (High demand) or 429 (Rate limit) means the key is 100% authenticated by Google!
       if (status === 503 || status === 429) {
@@ -249,7 +271,8 @@ export async function testGeminiKey(apiKey: string): Promise<{ ok: boolean; mess
     }
   }
 
-  return { ok: false, message: `خطا در برقراری ارتباط با گوگل: ${lastError?.message || lastError}` };
+  const cleanLastErr = sanitizeErrorMessage(lastError?.message || lastError, cleanKey);
+  return { ok: false, message: `خطا در برقراری ارتباط با گوگل: ${cleanLastErr}` };
 }
 
 // جلوگیری از خطای ۴۰۰ جمینای به خاطر پیام‌های تکراری پشت سر هم
@@ -623,7 +646,7 @@ async function askGeminiInternal(
     }
   }
 
-  const apiKey = getActiveGeminiKey() || process.env.GEMINI_API_KEY || CONFIG.GEMINI_API_KEY;
+  const apiKey = sanitizeApiKey(getActiveGeminiKey() || process.env.GEMINI_API_KEY || CONFIG.GEMINI_API_KEY || "");
 
   // اگر هنوز کلیدی ست نشده، پاسخ رفاقتی و هوشمند بده
   if (!apiKey) {
@@ -684,12 +707,6 @@ async function askGeminiInternal(
     });
 
     const contents = sanitizeContents(rawContents);
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      // @ts-ignore
-      httpOptions: agent ? { agent } : undefined,
-    });
 
     const modelCandidates = getModelCandidateChain();
 
@@ -998,7 +1015,9 @@ async function askGeminiInternal(
     const tempRaw = parseFloat(getSetting("ai_temperature", "0.7"));
     const activeTemperature = !isNaN(tempRaw) && tempRaw >= 0.0 && tempRaw <= 2.0 ? tempRaw : 0.7;
 
-    const rawKeyPool = CONFIG.GEMINI_API_KEYS.filter((k) => k && k.length > 5 && !isKeyDead(k));
+    const rawKeyPool = CONFIG.GEMINI_API_KEYS
+      .map(sanitizeApiKey)
+      .filter((k) => k && k.length > 5 && !isKeyDead(k));
     if (rawKeyPool.length === 0 && apiKey && !isKeyDead(apiKey)) {
       rawKeyPool.push(apiKey);
     }
@@ -1114,18 +1133,17 @@ async function askGeminiInternal(
               ? 404
               : 0);
 
-          // 1. Auth errors (401, 403, API_KEY_INVALID): mark key permanently dead & retry SAME model with next key
+          // 1. Auth errors or API key format/header errors: mark key permanently dead, log masked warning & retry SAME model with next key
           const isAuthError =
             status === 401 ||
             status === 403 ||
-            String(err?.message || "").includes("API_KEY_INVALID") ||
-            String(err?.message || "").includes("API key not valid") ||
-            String(err?.message || "").includes("invalid api key");
+            isApiKeyError(err);
 
           if (isAuthError) {
             markKeyDead(currentKey);
+            const cleanErr = sanitizeErrorMessage(err?.message || err, currentKey);
             console.warn(
-              `[GEMINI AUTH ERROR] Model ${m} API key ${maskApiKey(currentKey)} is invalid/revoked (status ${status}). Disabling key permanently.`
+              `[GEMINI KEY ERROR] Model ${m} API key ${maskApiKey(currentKey)} failed format/auth check (${cleanErr}). Invalidating key and rotating.`
             );
             keysTriedCall1++;
             const idx = keyPool.indexOf(currentKey);
@@ -1485,18 +1503,17 @@ async function askGeminiInternal(
               ? 404
               : 0);
 
-          // 1. Auth errors (401, 403, API_KEY_INVALID): mark key permanently dead & retry SAME model with next key
+          // 1. Auth errors or API key format/header errors: mark key permanently dead, log masked warning & retry SAME model with next key
           const isAuthError =
             status === 401 ||
             status === 403 ||
-            String(err?.message || "").includes("API_KEY_INVALID") ||
-            String(err?.message || "").includes("API key not valid") ||
-            String(err?.message || "").includes("invalid api key");
+            isApiKeyError(err);
 
           if (isAuthError) {
             markKeyDead(currentKey);
+            const cleanErr = sanitizeErrorMessage(err?.message || err, currentKey);
             console.warn(
-              `[GEMINI AUTH ERROR] Model ${m} API key ${maskApiKey(currentKey)} is invalid/revoked on call 2 (status ${status}). Disabling key permanently.`
+              `[GEMINI KEY ERROR] Model ${m} API key ${maskApiKey(currentKey)} failed format/auth check on call 2 (${cleanErr}). Invalidating key and rotating.`
             );
             keysTriedCall2++;
             const idx = keyPool.indexOf(currentKey);
@@ -1655,7 +1672,8 @@ async function askGeminiInternal(
     }
 
     if (!response) {
-      console.error(`[GEMINI ERROR] All model candidates failed. Last status: ${lastErr?.status || lastErr?.message || "unknown"}`);
+      const cleanLastErr = sanitizeErrorMessage(lastErr?.status || lastErr?.message || "unknown");
+      console.error(`[GEMINI ERROR] All model candidates failed. Last status: ${cleanLastErr}`);
       return "سرور هوش مصنوعی در حال حاضر شلوغ است، لطفاً یک دقیقه دیگر تلاش کنید ⏳";
     }
 
@@ -1709,7 +1727,8 @@ async function askGeminiInternal(
     if (signal?.aborted || error?.name === "AbortError") {
       return STOPPED_RESULT;
     }
-    console.error("Gemini API Error:", error?.status || error?.message || "unknown error");
+    const cleanErr = sanitizeErrorMessage(error?.status || error?.message || "unknown error");
+    console.error("Gemini API Error:", cleanErr);
     return "سرور هوش مصنوعی در حال حاضر شلوغ است، لطفاً یک دقیقه دیگر تلاش کنید ⏳";
   }
 }

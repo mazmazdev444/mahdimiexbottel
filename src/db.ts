@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import fs from "fs";
 import path from "path";
-import { CONFIG } from "./config";
+import { CONFIG, sanitizeApiKey } from "./config";
 
 let activeDbPath = CONFIG.DB_PATH;
 const dbDir = path.dirname(activeDbPath);
@@ -158,7 +158,17 @@ try {
 export function getSetting(key: string, defaultValue = ""): string {
   try {
     const row = db.query("SELECT value FROM bot_settings WHERE key = ?").get(key) as any;
-    return row?.value !== undefined && row?.value !== null ? row.value : defaultValue;
+    const val = row?.value !== undefined && row?.value !== null ? row.value : defaultValue;
+    if (key === "gemini_api_key") {
+      const clean = sanitizeApiKey(val);
+      if (!clean && val) {
+        try {
+          db.run("DELETE FROM bot_settings WHERE key = ?", ["gemini_api_key"]);
+        } catch {}
+      }
+      return clean;
+    }
+    return val;
   } catch {
     return defaultValue;
   }
@@ -166,7 +176,15 @@ export function getSetting(key: string, defaultValue = ""): string {
 
 export function setSetting(key: string, value: string): void {
   try {
-    db.run("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", [key, value]);
+    let cleanVal = value;
+    if (key === "gemini_api_key") {
+      cleanVal = sanitizeApiKey(value);
+      if (!cleanVal) {
+        deleteSetting("gemini_api_key");
+        return;
+      }
+    }
+    db.run("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", [key, cleanVal]);
     saveStateSnapshot();
   } catch (e: any) {
     console.warn("Failed to set bot setting:", e?.message);
@@ -221,6 +239,13 @@ export function restoreStateSnapshot() {
     }
     if (Array.isArray(data.settings)) {
       for (const s of data.settings) {
+        if (s.key === "gemini_api_key") {
+          const clean = sanitizeApiKey(s.value);
+          if (clean) {
+            db.run("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", [s.key, clean]);
+          }
+          continue;
+        }
         db.run("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", [s.key, s.value]);
       }
     }
