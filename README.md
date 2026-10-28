@@ -4,11 +4,12 @@
 
 **A High-Performance, Multimodal AI Agent for Telegram powered by Google Gemini and Bun Runtime**
 
-[![English](https://img.shields.io/badge/Language-English-blue?style=for-the-badge)](README.md)
-[![Persian](https://img.shields.io/badge/Language-%D9%81%D8%A7%D8%B1%D8%B3%DB%8C-green?style=for-the-badge)](README_FA.md)
-[![Chinese](https://img.shields.io/badge/Language-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-red?style=for-the-badge)](README_ZH.md)
+---
 
-<br/>
+🌐 **Language Selector / انتخاب زبان / 语言选择**  
+[🇬🇧 **English (Default)**](README.md) &nbsp; | &nbsp; [🇮🇷 **فارسی (Persian)**](README_FA.md) &nbsp; | &nbsp; [🇨🇳 **简体中文 (Chinese)**](README_ZH.md)
+
+---
 
 [![Runtime](https://img.shields.io/badge/Runtime-Bun%20v1.4+-black?logo=bun)](https://bun.sh/)
 [![Language](https://img.shields.io/badge/Language-TypeScript%205+-blue?logo=typescript)](https://www.typescriptlang.org/)
