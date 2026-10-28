@@ -18,6 +18,7 @@ import {
   extractRepliedMessageContent,
   stripLeadingWakeWord,
 } from "../utils/replyContext";
+import { isCommandForOtherBot } from "../utils/commandUtils";
 import {
   isBugReport,
   isFeedbackOrCriticism,
@@ -152,6 +153,12 @@ export async function handleTextMessage(ctx: Context) {
   // ⛔ اگر اسم مزمز وسط جمله کاربران عادی باشد، ربات کاملاً سکوت می‌کند.
   if (isGroup) {
     const botInfo = ctx.me;
+
+    // اگر پیامی دستور اسلش برای بات دیگری در گروه است (/cmd@OtherBot)، کاملاً نادیده گرفته شود
+    if (isCommandForOtherBot(text, botInfo.username, ctx.message?.entities as any)) {
+      return;
+    }
+
     const isReplyToBot = ctx.message?.reply_to_message?.from?.id === botInfo.id;
     const isBotMentioned = lower.includes(`@${botInfo.username.toLowerCase()}`);
     const isDirectCallAtStart = /^(?:(?:سلام|درود|هی|الو|چطوری|ey|hi|hello)\s+)?(?:مزمز|mazmaz)(?:[،,:.!؟?\s]|$)/i.test(text.trim());
@@ -200,15 +207,16 @@ export async function handleTextMessage(ctx: Context) {
           cleanText = strippedReplied;
           isWakeWordOnlyReply = true;
         }
-      } else if (hasRepliedPhoto) {
+      }
+      if (!cleanText && hasRepliedPhoto) {
         // ب) اگر عکس ریپلای‌شده بدون متن است: پرامپت پیش‌فرض تحلیل تصویر
         cleanText = "این تصویر را دقیق تحلیل و بررسی کن";
         isWakeWordOnlyReply = true;
       }
     }
 
-    // ج) فقط در صورتی احوال‌پرسی هاردکدشده ارسال می‌شود که هم متن تمیز کاربر خالی باشد و هم ریپلای یا مدیایی نباشد
-    if (!cleanText && !hasRepliedMedia) {
+    // ج) فقط در صورتی احوال‌پرسی هاردکدشده ارسال می‌شود که هم متن تمیز کاربر خالی باشد و هم ریپلای یا عکس وجود نداشته باشد
+    if (!cleanText) {
       const greetings = [
         "جانم داداش؟ گوشم کاملاً با توئه، بگو ببینم چی می‌خوای! 👂😎",
         "جون دلم رفیق! مزمز اینجاست، امر بفرما 🚀",

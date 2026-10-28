@@ -63,6 +63,7 @@ import { getWeather } from "./services/weather";
 import { getCryptoPrices } from "./services/crypto";
 import { getDollarAndGoldReport } from "./services/currency";
 import { LMSYS_ARENA_SUMMARY, TOP_HARDWARE_BENCHMARKS } from "./services/benchmarks";
+import { isCommandForOtherBot } from "./utils/commandUtils";
 import {
   testGeminiKey,
   clearUserHistory,
@@ -142,6 +143,22 @@ bot.use(accessControlMiddleware);
 bot.catch((err) => {
   const ctx = err.ctx;
   console.warn(`[GLOBAL SAFEGUARD] Handled error in update ${ctx.update?.update_id}:`, (err.error as any)?.message || err.error);
+});
+
+// 1.0 میان‌افزار ایزوله‌سازی دستورات در گروه‌ها: نادیده‌گرفتن کامل دستوراتی که برای سایر بات‌ها ارسال شده‌اند
+bot.use(async (ctx, next) => {
+  const chatType = ctx.chat?.type;
+  const isGroup = chatType === "group" || chatType === "supergroup";
+  if (isGroup) {
+    const text = ctx.message?.text || ctx.message?.caption;
+    const entities = (ctx.message?.entities || ctx.message?.caption_entities) as any;
+    const botUsername = ctx.me?.username || "mazmazAgentBot";
+    if (isCommandForOtherBot(text, botUsername, entities)) {
+      // دستور دارای یوزرنیم بات دیگری است (/cmd@OtherBot)؛ مزمز کاملاً سکوت می‌کند
+      return;
+    }
+  }
+  return await next();
 });
 
 // 1.5 مدیریت دعوت ربات به گروه‌ها (تایید رسمی ادمین و ثبت هویت اد کننده)
@@ -264,23 +281,6 @@ bot.command(["start", "start@mazmazAgentBot"], async (ctx) => {
   await handleStart(ctx);
 });
 
-// هندل کردن کامند history و clear
-bot.command(
-  ["history", "history@mazmazAgentBot", "clear", "clear@mazmazAgentBot"],
-  async (ctx) => {
-    if (ctx.from) {
-      clearUserHistory(ctx.from.id);
-    }
-    await ctx.reply(
-      "🧹 <b>حافظه مکالمه با موفقیت پاک شد!</b>\nاکنون می‌توانید گفتگوی جدیدی را بدون پیش‌زمینه قبلی آغاز کنید.",
-      {
-        parse_mode: "HTML",
-        reply_parameters: { message_id: ctx.message!.message_id, allow_sending_without_reply: true },
-      }
-    );
-  }
-);
-
 bot.command(["help", "help@mazmazAgentBot"], handleHelp);
 bot.command(["tasks", "tasks@mazmazAgentBot"], (ctx) => renderTasksMenu(ctx, ctx.from!.id));
 bot.command(["weather", "weather@mazmazAgentBot", "hava"], async (ctx) => {
@@ -341,8 +341,8 @@ bot.command(["music", "song", "ahang", "music@mazmazAgentBot"], async (ctx) => {
   await sendMusicToTelegram(ctx, query);
 });
 
-// 1.1 دستور پاکسازی حافظه چت (/clear)
-bot.command(["clear", "clear@mazmazAgentBot", "reset"], async (ctx) => {
+// 1.1 دستور پاکسازی حافظه چت (/clear و /reset)
+bot.command(["clear", "clear@mazmazAgentBot", "reset", "reset@mazmazAgentBot"], async (ctx) => {
   const chatId = ctx.chat.id;
   const userId = ctx.from?.id;
 
@@ -354,7 +354,10 @@ bot.command(["clear", "clear@mazmazAgentBot", "reset"], async (ctx) => {
   await ctx.reply(
     "🧹 <b>حافظه و زمینه گفتگو برای این چت با موفقیت پاکسازی شد!</b>\n\n" +
       "از این لحظه، هوش مصنوعی بدون پیش‌زمینه و سابقه قبلی پاسخ خواهد داد. 🚀",
-    { parse_mode: "HTML" }
+    {
+      parse_mode: "HTML",
+      reply_parameters: { message_id: ctx.message!.message_id, allow_sending_without_reply: true },
+    }
   );
 });
 
@@ -2222,7 +2225,8 @@ async function launchBotWithResilience() {
               { command: "weather", description: "🌤️ وضعیت زنده و پیش‌بینی آب و هوا" },
               { command: "tasks", description: "📋 مدیریت لیست کارها" },
               { command: "stop", description: "🛑 توقف گفتگو و پاکسازی" },
-              { command: "history", description: "🧹 پاک کردن حافظه چت" },
+              { command: "clear", description: "🧹 پاکسازی حافظه و زمینه گفتگو" },
+              { command: "history", description: "📜 مشاهده تاریخچه و لاگ گفتگو" },
             ],
             { scope: { type: "chat", chat_id: adminId } }
           ).catch(() => {});
@@ -2320,4 +2324,6 @@ async function launchBotWithResilience() {
   }
 }
 
-launchBotWithResilience();
+if (process.env.NODE_ENV !== "test") {
+  launchBotWithResilience();
+}

@@ -1,180 +1,187 @@
 <div align="center">
 
-# 🤖 MazMaz Telegram Bot (ربات هوشمند مزمز)
+# 🤖 MazMaz Telegram Bot
 
-**یک دستیار هوشمند، چندمنظوره و فوق‌سریع در بستر تلگرام، مبتنی بر هوش مصنوعی گوگل جمینای و رانتایم Bun**
+**A High-Performance, Multimodal AI Agent for Telegram powered by Google Gemini and Bun Runtime**
+
+[![English](https://img.shields.io/badge/Language-English-blue?style=for-the-badge)](README.md)
+[![Persian](https://img.shields.io/badge/Language-%D9%81%D8%A7%D8%B1%D8%B3%DB%8C-green?style=for-the-badge)](README_FA.md)
+[![Chinese](https://img.shields.io/badge/Language-%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-red?style=for-the-badge)](README_ZH.md)
+
+<br/>
 
 [![Runtime](https://img.shields.io/badge/Runtime-Bun%20v1.4+-black?logo=bun)](https://bun.sh/)
 [![Language](https://img.shields.io/badge/Language-TypeScript%205+-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Framework](https://img.shields.io/badge/Framework-grammY%20v1.34+-2ea44f?logo=telegram)](https://grammy.dev/)
 [![Database](https://img.shields.io/badge/Database-SQLite%20(bun:sqlite)-003B57?logo=sqlite)](https://bun.sh/docs/api/sqlite)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%20API-4285F4?logo=google)](https://ai.google.dev/)
-[![Tests](https://img.shields.io/badge/Tests-140+%20Passed-brightgreen)](https://bun.sh/docs/cli/test)
+[![Tests](https://img.shields.io/badge/Tests-155+%20Passed-brightgreen)](https://bun.sh/docs/cli/test)
 
 </div>
 
 ---
 
-## 📖 معرفی (Overview)
+## 📖 Overview
 
-**مزمز** یک ربات تلگرامی ماژولار، چابک و قدرتمند است که برای گفتگوهای هوشمند روزمره، انجام محاسبات فنی، جستجوهای زنده وب، مدیریت گروه‌های تلگرامی و دانلود رسانه‌های آنلاین طراحی شده است. این پروژه با استفاده از رانتایم مدرن **Bun** و زبان **TypeScript** توسعه یافته و برای پایداری و تاب‌آوری حداکثری در ترافیک‌های بالا بهینه‌سازی شده است.
-
----
-
-## ✨ قابلیت‌ها و ویژگی‌های کلیدی (Key Features)
-
-### 🧠 ۱. هوش مصنوعی پیشرفته و مکالمه هوشمند (Multimodal AI)
-- **پشتیبانی از مدل‌های سریع Gemini:** بهره‌گیری پیش‌فرض از مدل‌های سری Flash گوگل برای پاسخ‌دهی آنی و باکیفیت به زبان فارسی و انگلیسی.
-- **تحلیل چندرسانه‌ای تصویر (Vision):** امکان ارسال تصاویر مستقیم یا ریپلای روی عکس‌ها جهت تحلیل، استخراج متن، شناسایی اشیاء و توضیح محتوا.
-- **درک عمیق کانتکست تلگرام:** شناسایی خودکار پیام‌های ریپلای‌شده، نقل‌قول‌ها (Quote)، فورواردها از کانال‌ها و گروه‌ها، و ایموجی استیکرها.
-- **سیستم کلمه بیدارباش (Wake-Word):** پاسخ‌دهی به خطاب مستقیم در گروه («مزمز»، منشن رسمی یا ریپلای روی ربات) و سکوت هوشمند در مکالمات غیرمرتبط اعضای گروه.
+**MazMaz** is a modular, agile, and resilient Telegram bot agent engineered for everyday smart conversations, technical computations, live web searches, community management, and rich multimedia streaming. Developed using the modern **Bun** runtime and **TypeScript**, it is architected for maximum fault tolerance, rapid startup, and high-throughput stability.
 
 ---
 
-### 🛠️ ۲. ابزارهای تعبیه‌شده هوش مصنوعی (AI Function Calling Tools)
-هوش مصنوعی به ابزارهای زیر دسترسی داشته و به صورت خودکار در زمان نیاز آن‌ها را فراخوانی می‌کند:
+## ✨ Key Features
 
-| آیکون | نام ابزار | عملکرد |
+### 🧠 1. Multimodal Conversational AI & Vision
+- **High-Speed Gemini Integration:** Powered by default by Google's latest Flash series models for ultra-low latency and natural multilingual understanding (Persian, English, etc.).
+- **Multimodal Visual Intelligence (Vision):** Direct photo uploads and reply-to-photo analysis, supporting OCR text extraction, visual reasoning, chart understanding, and scene explanation.
+- **Deep Telegram Context Awareness:** Seamlessly digests replied messages, native Telegram quotes (API 7.0+), channel/group forward headers, and sticker emojis.
+- **Smart Wake-Word & Group Mentions:** Reacts when directly invoked ("مزمز", @bot username, or direct reply), maintaining respectful silence during unrelated group conversations.
+
+---
+
+### 🛠️ 2. Integrated AI Function Calling Tools
+The model dynamically decides when to invoke built-in real-time tools:
+
+| Icon | Tool Name | Description |
 | :---: | :--- | :--- |
-| 🔍 | **جستجوی وب (Web Search)** | جستجوی زنده در اینترنت جهت دریافت اخبار روز، مقالات و اطلاعات موثق به همراه درج منابع معتبر |
-| 🌤️ | **وضعیت آب‌وهوا (Weather)** | گزارش دقیق دما، وضعیت جوی، رطوبت، باد و پیش‌بینی چندروزه برای شهرهای ایران و جهان |
-| 💰 | **بازار مالی و ارز (Financial Rates)** | استعلام نرخ لحظه‌ای دلار، یورو، درهم، سکه بهار آزادی و طلای ۱۸ عیار |
-| 🪙 | **قیمت رمزارزها (Crypto Market)** | قیمت زنده بیت‌کوین، اتریوم، تتر، تون‌کوین و سایر ارزهای دیجیتال به همراه درصد تغییرات |
-| 🧮 | **محاسبه‌گر ریاضی (Math Evaluator)** | حل امن و ایزوله معادلات ریاضی، عملیات مثلثاتی و محاسبات مهندسی |
-| 🌐 | **صفحه‌خوان لینک (Link Reader)** | دریافت محتوای صفحات وب و لینک‌های ارسالی کاربر و ارائه خلاصه‌ای جامع |
+| 🔍 | **Live Web Search** | Real-time web retrieval for current events, news, and technical documentation with cited sources |
+| 🌤️ | **Weather Forecast** | Precise temperature, weather conditions, wind, humidity, and multi-day forecasts worldwide |
+| 💰 | **Financial & Gold Rates** | Real-time tracking of currency exchange rates, gold benchmarks, and fiat indicators |
+| 🪙 | **Cryptocurrency Market** | Live prices for Bitcoin (BTC), Ethereum (ETH), USDT, TON, and altcoins with 24h change percentages |
+| 🧮 | **Sandboxed Math Evaluator** | Safe mathematical evaluation of complex formulas, trigonometry, and engineering calculations |
+| 🌐 | **Web Link Reader** | Extracts and synthesizes concise summaries from arbitrary web links shared by users |
 
 ---
 
-### 📥 ۳. دانلود چندرسانه‌ای و استریم موزیک (Media & Music Downloader)
-- **دانلود از شبکه‌های اجتماعی:**
-  - شناسایی خودکار لینک‌های یوتیوب (YouTube)، اینستاگرام (Instagram)، پینترست (Pinterest)، توییتر (Twitter/X) و تیک‌تاک (TikTok).
-  - ارائه دکمه‌های شیشه‌ای تعاملی جهت انتخاب فرمت دلخواه: **دانلود ویدیو (MP4)** یا **استخراج صوت (MP3)**.
-- **جستجو و دریافت موزیک:**
-  - جستجوی هوشمند قطعات موسیقی با تایپ نام آهنگ یا خواننده.
-  - ارسال مستقیم فایل صوتی با متادیتا و کاور در تلگرام.
+### 📥 3. Media Downloader & Music Streaming
+- **Social Media Downloader:**
+  - Auto-detects media links from YouTube, Instagram, Pinterest, Twitter/X, and TikTok.
+  - Interactive inline buttons to choose between **Video (MP4)** or **Audio extraction (MP3)**.
+- **Music Search & Streaming:**
+  - Fast search by track title or artist name.
+  - Direct delivery of audio files (up to 50MB) complete with metadata and cover art in chat.
 
 ---
 
-### 👥 ۴. مدیریت گروه و دستیار ناظر (Group Management & Moderation)
-- **خلاصه پیام‌های گروه (Group Digest):** قابلیت تحلیل و خلاصه‌سازی هوشمند ۵۰ پیام اخیر گروه جهت مطلع شدن از مباحث، سوالات و تصمیمات مطرح‌شده.
-- **دستورات مدیریتی ادمین:**
-  - اخراج یا بن دائم (`/ban` یا دستور فارسی «بنش کن»).
-  - بی‌صدا کردن موقت کاربر (`/mute` برای مدت زمان دلخواه مانند ۱ ساعت، ۱ روز یا دستور فارسی «میوتش کن»).
-  - رفع محدودیت و آن‌میوت (`/unmute`).
-  - حذف آنی پیام‌های نامناسب با ریپلای (`/del` یا «پاکش کن»).
-- **خروج محترمانه از گروه:** امکان فرمان به ربات برای لفت دادن از گروه توسط ادمین.
-- **سیستم فیلتر الفاظ نامناسب:** شناسایی محتوای مخرب به همراه پاسخ طنز بازدارنده و اعلان به ادمین.
-- **کنترل سهمیه روزانه (Rate Limiting):** سهمیه‌بندی مصرف روزانه پیام در گروه‌ها جهت جلوگیری از مصرف بی‌رویه و سوءاستفاده.
+### 👥 4. Group Management & Moderation
+- **Group Digest:** AI-generated summary synthesizing the last 50 group messages into topics, questions, and action items.
+- **Admin Moderation Commands:**
+  - Permanent ban (`/ban` or natural language command).
+  - Timed mute (`/mute` with duration support, e.g., 1h, 1d).
+  - Unmute (`/unmute`).
+  - Quick delete on reply (`/del`).
+- **Group Command Isolation:** Automatically ignores slash commands addressed to other bots (e.g. `/cmd@OtherBot`) in group chats.
+- **Profanity Filtering:** Detects abusive language, issues a humorous deterrent response, and alerts administrators.
+- **Daily Rate Limiting:** Enforces configurable daily quotas per user in groups to prevent resource exhaustion.
 
 ---
 
-### 📝 ۵. مدیریت وظایف روزانه (To-Do & Tasks)
-- ثبت سریع کارها با دستور متنی (مانند: `تسک جدید: مطالعه کتاب` یا `/add پروژه جدید`).
-- مشاهده لیست وظایف با دکمه‌های شیشه‌ای، امکان تغییر وضعیت به «انجام‌شده» یا حذف تسک‌ها.
+### 📝 5. Personal Task & To-Do Management
+- Add tasks quickly via commands (e.g. `/add Learn TypeScript` or natural language).
+- Interactive inline keyboard to toggle completion status, inspect, or delete tasks.
 
 ---
 
-## 🏗️ معماری فنی و پایداری (Architecture & Resilience)
+## 🏗️ Architecture & Resilience
 
-1. **مدیریت تاب‌آوری کلیدهای API (Key Rotation & Dynamic Cooldown):**
-   - چرخش خودکار میان مجموعه‌ای از کلیدهای API.
-   - در صورت وقوع خطای محدودیت نرخ (HTTP 429) یا خطای موقت سرور (HTTP 503)، کلید یا مدل وارد وضعیت استراحت موقت شده و درخواست بدون توقف با کلید بعدی تکرار می‌شود.
-2. **جداسازی دو مرحله‌ای فراخوانی ابزارها (Call 1 / Call 2 Decoupling):**
-   - اجرای ابزارها در مرحله اول با مدل‌های بهینه‌سازی‌شده برای Function Calling و بازگشت نتایج پردازش‌شده به مدل برای تدوین متن نهایی و جلوگیری از خطاهای اعتبارسنجی پارامترها.
-3. **ارسال ایمن و چندبخشی پیام‌ها (Safe Message Chunker):**
-   - تقسیم خودکار پاسخ‌های بسیار طولانی مدل به بخش‌های مجاز تلگرام (زیر ۳۸۰۰ کاراکتر) بدون آسیب زدن به بلوک‌های کد (`pre/code`) و تگ‌های قالب‌بندی HTML.
-4. **دیتابیس SQLite محلی:**
-   - ذخیره‌سازی فوق‌العاده سریع با کتابخانه بومی `bun:sqlite` برای کاربران، گروه‌ها، آمارها، تسک‌ها و تنظیمات شخصی‌سازی رفتار ربات.
+1. **API Key Rotation & Dynamic Cooldown:**
+   - Automatic round-robin rotation across an array of Gemini API keys.
+   - When encountering rate limits (HTTP 429) or transient server errors (HTTP 503), the key/model enters a temporary cooldown, immediately falling back to the next available credential.
+2. **Two-Stage Tool Decoupling (Call 1 / Call 2):**
+   - Stage 1 uses function-calling models to execute tools and gather context; Stage 2 formats the final conversational response, eliminating parameter validation errors.
+3. **Safe Message Chunker:**
+   - Automatically splits lengthy responses to comply with Telegram's 4096-character limit (chunking at ~3800 chars) while preserving unclosed Markdown code blocks (` ``` `) and HTML tags.
+4. **Embedded SQLite Database:**
+   - Zero-dependency local persistence using native `bun:sqlite` for users, groups, quotas, tasks, and customizable bot settings.
 
 ---
 
-## 🚀 نصب و راه‌اندازی محلی (Getting Started)
+## 🚀 Getting Started
 
-### پیش‌نیازها
-- نصب [Bun](https://bun.sh/) (نسخه ۱.۱ به بالا)
-- توکن ربات تلگرام از [BotFather@](https://t.me/BotFather)
-- حداقل یک کلید API از [Google AI Studio](https://aistudio.google.com/)
+### Prerequisites
+- [Bun](https://bun.sh/) (v1.1 or higher recommended)
+- A Telegram Bot Token from [@BotFather](https://t.me/BotFather)
+- At least one Google Gemini API key from [Google AI Studio](https://ai.google.dev/)
 
-### ۱. کلون کردن مخزن
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/MahdiMiex/mazmaz_bot_ts.git
 cd mazmaz_bot_ts
 ```
 
-### ۲. نصب وابستگی‌ها
+### 2. Install Dependencies
 ```bash
 bun install
 ```
 
-### ۳. تنظیم متغیرهای محیطی
-یک فایل `.env` بر اساس نمونه زیر ایجاد کنید:
+### 3. Configure Environment Variables
+Create a `.env` file based on the following template:
 
 ```env
-# توکن ربات تلگرام دریافتی از BotFather
+# Telegram Bot Token from @BotFather
 BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
 
-# آیدی‌های عددی ادمین‌های ربات (با کاما جدا شوند)
+# Numerical Telegram IDs of administrators (comma-separated)
 ADMIN_IDS=123456789
 
-# کلیدهای API گوگل جمینای (پشتیبانی از چندین کلید با کاما)
+# Google Gemini API keys (comma-separated for auto-rotation)
 GEMINI_API_KEYS=AIzaSyExampleKey1,AIzaSyExampleKey2
 AI_MODEL=gemini-3.5-flash-lite
 
-# کلیدهای اختیاری برای جستجوی وب تکمیلی
+# Optional search provider keys
 TAVILY_API_KEY=
 BRAVE_API_KEY=
 SEARXNG_URL=
 
-# تنظیمات پروکسی تلگرام (در صورت نیاز به عبور از فیلترینگ)
+# Proxy configuration (if needed)
 USE_PROXY=true
 PROXY_URL=http://127.0.0.1:10808
 
-# سهمیه پیام روزانه کاربران عادی در گروه‌ها
+# Default daily message quota for non-admin group members
 DEFAULT_DAILY_QUOTA=24
 ```
 
-### ۴. اجرای تست‌ها
-پروژه دارای سوئیت تست خودکار با پوشش بالا است:
+### 4. Run Test Suite
 ```bash
 bun test
 ```
 
-### ۵. اجرای ربات
-- **حالت توسعه (با Hot Reload):**
+### 5. Start the Bot
+- **Development Mode (with Hot Reload):**
 ```bash
 bun run dev
 ```
-- **حالت تولید (Production):**
+- **Production Mode:**
 ```bash
 bun run start
 ```
 
 ---
 
-## 🕹️ دستورات کاربردی ربات (Bot Commands)
+## 🕹️ Bot Commands
 
-| دستور | توضیحات |
+| Command | Description |
 | :--- | :--- |
-| `/start` | شروع به کار ربات و نمایش منوی اصلی |
-| `/help` | راهنمای جامع ابزارها، قابلیت‌ها و دستورات |
-| `/tasks` | مدیریت لیست تسک‌ها و کارهای شخصی |
-| `/stats` | مشاهده آمار و وضعیت فعالیت ربات |
-| `/changelog` | مشاهده آخرین تغییرات و قابلیت‌های اضافه‌شده |
-| `/ban [کاربر]` | اخراج و بن دائم کاربر از گروه (مخصوص ادمین) |
-| `/mute [زمان]` | میوت و بی‌صدا کردن کاربر در گروه (مخصوص ادمین) |
-| `/unmute` | رفع بی‌صدایی و اجازه ارسال پیام به کاربر (مخصوص ادمین) |
-| `/del` | حذف پیام ریپلای‌شده در گروه (مخصوص ادمین) |
+| `/start` | Launch the bot and display the main interactive menu |
+| `/help` | Detailed command manual and usage instructions |
+| `/clear` | Clear conversation memory and reset AI context |
+| `/history` | View recent dialogue history or generate group digest |
+| `/tasks` | Manage personal to-do list |
+| `/stats` | View operational statistics and bot performance |
+| `/changelog` | View the latest updates and release notes |
+| `/ban [user]` | Permanently ban a user from the group (Admin only) |
+| `/mute [duration]` | Mute a user for a specified duration (Admin only) |
+| `/unmute` | Lift mute restrictions for a user (Admin only) |
+| `/del` | Delete the replied message in a group (Admin only) |
 
 ---
 
-## 🔒 امنیت و حریم خصوصی (Security & Privacy)
+## 🔒 Security & Privacy
 
-- **ایزوله‌سازی کدهای اجرایی:** کدهای ارزیابی ریاضی در محیط امن و بدون دسترسی به فایل‌سیستم یا توابع سیستمی اجرا می‌شوند.
-- **حفاظت از کلیدها:** هیچ‌گونه کلید خصوصی، آیدی عددی حساس یا اطلاعات محیطی در مخزن قرار داده نشده و تمام ارتباطات از طریق متغیرهای محیطی امن مدیریت می‌شوند.
-- **مدیریت دسترسی:** قابلیت‌های پیکربندی و اعمال نظارت در گروه‌ها صرفاً برای شناسه‌های تعریف‌شده در `ADMIN_IDS` فعال است.
+- **Sandboxed Execution:** Mathematical evaluations run in a strictly isolated context without access to file systems or OS APIs.
+- **Credential Hygiene:** No secrets, tokens, private endpoints, or admin identifiers are embedded in the codebase. All sensitive data is injected via environment variables.
+- **Role-Based Access Control:** Administrative features and moderation tools are restricted exclusively to IDs defined in `ADMIN_IDS`.
 
 ---
 
-## 📄 مجوز (License)
+## 📄 License
 
-این پروژه تحت مجوز **MIT** منتشر شده است. استفاده، ویرایش و توسعه آن با رعایت شرایط مجوز بلامانع است.
+This project is licensed under the **MIT License**. You are free to use, modify, and distribute it in accordance with the license terms.

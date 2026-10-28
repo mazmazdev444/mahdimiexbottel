@@ -8,6 +8,7 @@ import {
   downloadTelegramPhotoAsBase64,
   extractRepliedMessageContent,
 } from "../utils/replyContext";
+import { isCommandForOtherBot } from "../utils/commandUtils";
 
 export async function handlePhotoMessage(ctx: Context) {
   const photos = ctx.message?.photo;
@@ -28,6 +29,12 @@ export async function handlePhotoMessage(ctx: Context) {
   // فیلتر در گروه‌ها: فقط در صورت ریپلای روی ربات، منشن یا خطاب مستقیم
   if (isGroup) {
     const botInfo = ctx.me;
+
+    // اگر کپشن عکس، دستوری برای بات دیگری در گروه است، کاملاً نادیده گرفته شود
+    if (isCommandForOtherBot(ctx.message?.caption, botInfo.username, ctx.message?.caption_entities as any)) {
+      return;
+    }
+
     const isReplyToBot = ctx.message?.reply_to_message?.from?.id === botInfo.id;
     const captionLower = (ctx.message?.caption || "").toLowerCase();
     const isBotMentioned = captionLower.includes(`@${botInfo.username.toLowerCase()}`);
