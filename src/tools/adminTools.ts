@@ -1,6 +1,7 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { db, setSetting, deleteGroup } from "../db";
 import { CONFIG } from "../config";
+import { formatGroupHistoryTurn } from "../utils/speaker";
 
 // ۱. اسکیماهای تفکیک‌شده ابزارهای مدیریتی برای هوش مصنوعی
 export const adminToolsDeclaration = [
@@ -230,12 +231,13 @@ export async function executeAdminTool(botOrApi: any, ctx: Context | any, name: 
 
       const limit = Math.min(args.limit || 50, 100);
       const rows = db.query(`
-        SELECT user_id, text FROM messages
-        WHERE chat_id = ? AND text != ''
-        ORDER BY id DESC LIMIT ?
-      `).all(targetChatId, limit) as { user_id: number; text: string }[];
-      
-      const history = rows.reverse().map((r, i) => `${i + 1}. [کاربر ${r.user_id}]: ${r.text}`).join("\n");
+        SELECT m.user_id, m.text, u.first_name, u.username FROM messages m
+        LEFT JOIN users u ON m.user_id = u.user_id
+        WHERE m.chat_id = ? AND m.text != ''
+        ORDER BY m.id DESC LIMIT ?
+      `).all(targetChatId, limit) as { user_id: number; text: string; first_name?: string; username?: string }[];
+
+      const history = rows.reverse().map((r, i) => `${i + 1}. ${formatGroupHistoryTurn(r.first_name || r.username || "کاربر", r.username, r.user_id, r.text)}`).join("\n");
       return { ok: true, chat_id: targetChatId, context: history || "پیامی در حافظه این گروه یافت نشد." };
     }
 

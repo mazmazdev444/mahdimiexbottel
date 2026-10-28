@@ -3,6 +3,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { CONFIG } from "../config";
 import { db } from "../db";
 import { getModelCandidateChain } from "./ai";
+import { formatGroupHistoryTurn } from "../utils/speaker";
 
 const agent = CONFIG.USE_PROXY ? new HttpsProxyAgent(CONFIG.PROXY_URL) : undefined;
 
@@ -10,6 +11,7 @@ export interface RawMessageRow {
   text?: string;
   user_id?: number;
   first_name?: string;
+  username?: string;
   role?: string;
 }
 
@@ -46,11 +48,11 @@ export async function generateChatDigest(
       // چت گروهی: دریافت از جدول messages
       rows = db
         .query(
-          `SELECT m.text, m.user_id, u.first_name 
-           FROM messages m 
-           LEFT JOIN users u ON m.user_id = u.user_id 
-           WHERE m.chat_id = ? 
-           ORDER BY m.id DESC 
+          `SELECT m.text, m.user_id, u.first_name, u.username
+           FROM messages m
+           LEFT JOIN users u ON m.user_id = u.user_id
+           WHERE m.chat_id = ?
+           ORDER BY m.id DESC
            LIMIT ?`
         )
         .all(chatId, safeLimit) as RawMessageRow[];
@@ -58,10 +60,10 @@ export async function generateChatDigest(
       // چت خصوصی: دریافت از جدول chat_history
       rows = db
         .query(
-          `SELECT role, content as text, user_id 
-           FROM chat_history 
-           WHERE user_id = ? 
-           ORDER BY id DESC 
+          `SELECT role, content as text, user_id
+           FROM chat_history
+           WHERE user_id = ?
+           ORDER BY id DESC
            LIMIT ?`
         )
         .all(chatId, safeLimit) as RawMessageRow[];
@@ -81,6 +83,9 @@ export async function generateChatDigest(
 
   const transcript = validMessages
     .map((m) => {
+      if (chatId < 0) {
+        return formatGroupHistoryTurn(m.first_name || m.username || "کاربر", m.username, m.user_id, m.text);
+      }
       const sender = m.first_name || (m.role === "model" ? "مزمز" : m.role === "user" ? "کاربر" : `کاربر ${m.user_id}`);
       return `[${sender}]: ${m.text}`;
     })

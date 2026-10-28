@@ -9,6 +9,7 @@ import {
   extractRepliedMessageContent,
 } from "../utils/replyContext";
 import { isCommandForOtherBot } from "../utils/commandUtils";
+import { formatGroupTurnPrompt } from "../utils/speaker";
 
 export async function handlePhotoMessage(ctx: Context) {
   const photos = ctx.message?.photo;
@@ -74,7 +75,15 @@ export async function handlePhotoMessage(ctx: Context) {
   const repliedInfo = extractRepliedMessageContent(replyMsg, quote);
 
   let caption = finalCaption;
-  if (replyMsg && repliedInfo.repliedText) {
+  if (isGroup) {
+    caption = formatGroupTurnPrompt({
+      from: ctx.from,
+      userId,
+      text: finalCaption,
+      replyFrom: replyMsg?.from,
+      repliedText: repliedInfo.repliedText || null,
+    });
+  } else if (replyMsg && repliedInfo.repliedText) {
     caption = `[پیام ریپلای‌شده]: "${repliedInfo.repliedText}"\n\n[درخواست کاربر]: ${finalCaption}`;
   }
 

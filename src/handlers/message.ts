@@ -20,6 +20,11 @@ import {
 } from "../utils/replyContext";
 import { isCommandForOtherBot } from "../utils/commandUtils";
 import {
+  formatCurrentSenderTag,
+  formatGroupTurnPrompt,
+  formatGroupHistoryTurn,
+} from "../utils/speaker";
+import {
   isBugReport,
   isFeedbackOrCriticism,
   handleBugReport,
@@ -429,10 +434,12 @@ export async function handleTextMessage(ctx: Context) {
   const isSummaryIntent = /^(?:(?:سلام|درود|هی|الو|چطوری)\s+)?(?:(?:مزمز|mazmaz)[،,:\s]+)?(?:خلاصه(?:\s*ی)?\s*(?:پیام‌?ها?|چت|گروه)|پیام‌?ها?ی?\s*گروه\s*رو\s*خلاصه\s*کن|چت\s*رو\s*خلاصه\s*کن|خلاصه\s*بده|خلاصه\s*کن)(?:\s.*)?$/i.test(text.trim());
   if (isSummaryIntent && isGroup && ctx.chat) {
     const rows = db.query(`
-      SELECT user_id, text FROM messages 
-      WHERE chat_id = ? AND text != '' 
-      ORDER BY id DESC LIMIT 50
-    `).all(ctx.chat.id) as { user_id: number; text: string }[];
+      SELECT m.user_id, m.text, u.first_name, u.username
+      FROM messages m
+      LEFT JOIN users u ON m.user_id = u.user_id
+      WHERE m.chat_id = ? AND m.text != ''
+      ORDER BY m.id DESC LIMIT 50
+    `).all(ctx.chat.id) as { user_id: number; text: string; first_name?: string; username?: string }[];
 
     if (rows.length === 0) {
       await ctx.reply(
@@ -447,7 +454,7 @@ export async function handleTextMessage(ctx: Context) {
       return;
     }
 
-    const historyFormatted = rows.reverse().map((r, i) => `${i + 1}. [کاربر ${r.user_id}]: ${r.text}`).join("\n");
+    const historyFormatted = rows.reverse().map((r, i) => `${i + 1}. ${formatGroupHistoryTurn(r.first_name || r.username || "کاربر", r.username, r.user_id, r.text)}`).join("\n");
     const summaryPrompt = `این ۵۰ پیام اخیر ارسالی در گروه است:\n\n${historyFormatted}\n\nلطفاً یک خلاصه جذاب، فوق‌العاده مرتب، دسته‌بندی‌شده و خوانا از موضوعات مطرح‌شده، سوالات و تصمیمات به زبان فارسی ارائه بده.`;
 
     const statusMsg = await ctx.reply("📋 <i>در حال مطالعه و خلاصه‌سازی پیام‌های اخیر گروه... ⏳</i>", {
@@ -807,14 +814,24 @@ export async function handleTextMessage(ctx: Context) {
   const currentText = cleanText || text;
 
   let promptToSend: string;
-  if (isWakeWordOnlyReply) {
-    // ریپلای فقط با کلمه بیدارباش: متن پیام ریپلای‌شده یا پرامپت تحلیل تصویر مستقیماً استفاده می‌شود
-    promptToSend = currentText;
-  } else if (replyMsg && repliedText) {
-    // ۳. ریپلای همراه با متن اضافی کاربر: فرمت استاندارد درخواستی
-    promptToSend = `[پیام ریپلای‌شده]: "${repliedText}"\n\n[درخواست کاربر]: ${currentText}`;
+  if (isGroup) {
+    promptToSend = formatGroupTurnPrompt({
+      from: ctx.from,
+      userId,
+      text: currentText,
+      replyFrom: replyMsg?.from,
+      repliedText: repliedText || null,
+    });
   } else {
-    promptToSend = currentText;
+    if (isWakeWordOnlyReply) {
+      // ریپلای فقط با کلمه بیدارباش: متن پیام ریپلای‌شده یا پرامپت تحلیل تصویر مستقیماً استفاده می‌شود
+      promptToSend = currentText;
+    } else if (replyMsg && repliedText) {
+      // ۳. ریپلای همراه با متن اضافی کاربر: فرمت استاندارد درخواستی
+      promptToSend = `[پیام ریپلای‌شده]: "${repliedText}"\n\n[درخواست کاربر]: ${currentText}`;
+    } else {
+      promptToSend = currentText;
+    }
   }
 
   const isForwarded = Boolean(
@@ -918,6 +935,9 @@ export async function handleTextMessage(ctx: Context) {
         fwdSource = ` از "${(ctx.message as any).forward_from.first_name}"`;
       }
       promptToSend = `[پیام فوروارد شده${fwdSource}]:\n"""\n${currentText}\n"""\n[راهنما برای مدل: کاربر این پیام را صرفاً برای خواندن، بررسی یا پاسخ به محتوای آن برایت فوروارد کرده است. محتوای آن را تحلیل کن یا پاسخ مناسب ارائه کن.]`;
+      if (isGroup) {
+        promptToSend = `${formatCurrentSenderTag(ctx.from, userId)}\n\n${promptToSend}`;
+      }
     }
     if (isGroup && ctx.chat) {
       promptToSend += `\n[کانتکست گروه: عنوان="${ctx.chat.title || "گروه"}" | شناسه عددی چت (chat_id)=${ctx.chat.id}]`;
