@@ -1,6 +1,6 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { db, setSetting, deleteGroup } from "../db";
-import { CONFIG } from "../config";
+import { CONFIG, updateGeminiApiKey, sanitizeApiKey } from "../config";
 import { formatGroupHistoryTurn } from "../utils/speaker";
 
 // ۱. اسکیماهای تفکیک‌شده ابزارهای مدیریتی برای هوش مصنوعی
@@ -275,6 +275,16 @@ export async function executeAdminTool(botOrApi: any, ctx: Context | any, name: 
           ok: true,
           message: `پیشنهاد تغییر مدل به ${proposedModel} با دکمه‌های تایید برای رئیس مهدی ارسال شد و منتظر تایید است.`,
         };
+      }
+
+      if (key === "gemini_api_key") {
+        const clean = sanitizeApiKey(value);
+        if (!clean) {
+          return { ok: false, error: "کلید نامعتبر است یا فرمت درستی ندارد." };
+        }
+        setSetting(key, clean);
+        updateGeminiApiKey(clean);
+        return { ok: true, message: `کلید Gemini با موفقیت تنظیم شد.` };
       }
 
       setSetting(key, value || "");

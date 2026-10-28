@@ -1,9 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { HttpsProxyAgent } from "https-proxy-agent";
-import { CONFIG } from "../config";
+import { CONFIG, sanitizeApiKey } from "../config";
 import { db } from "../db";
 import { getModelCandidateChain } from "./ai";
 import { formatGroupHistoryTurn } from "../utils/speaker";
+import { getActiveGeminiKey, isApiKeyError, sanitizeErrorMessage, markKeyDead } from "./resilience";
 
 const agent = CONFIG.USE_PROXY ? new HttpsProxyAgent(CONFIG.PROXY_URL) : undefined;
 
@@ -91,16 +92,15 @@ export async function generateChatDigest(
     })
     .join("\n");
 
-  const apiKey = CONFIG.GEMINI_API_KEY || (CONFIG.GEMINI_API_KEYS && CONFIG.GEMINI_API_KEYS[0]);
+  const apiKey = sanitizeApiKey(
+    getActiveGeminiKey() ||
+    CONFIG.GEMINI_API_KEY ||
+    (CONFIG.GEMINI_API_KEYS && CONFIG.GEMINI_API_KEYS[0]) ||
+    ""
+  );
   if (!apiKey) {
-    return "خطا: کلید هوش مصنوعی برای تولید دایجست چت تنظیم نشده است.";
+    return "خطا: کلید هوش مصنوعی معتبری برای تولید دایجست چت تنظیم نشده است.";
   }
-
-  const ai = new GoogleGenAI({
-    apiKey,
-    // @ts-ignore
-    httpOptions: agent ? { agent } : undefined,
-  });
 
   const focusInstruction = focus ? `\n- تمرکز ویژه در خلاصه روی این موضوع یا شخص باشد: «${focus}»` : "";
 
@@ -128,6 +128,11 @@ ${transcript}`;
 
   for (const model of fastModels) {
     try {
+      const ai = new GoogleGenAI({
+        apiKey,
+        // @ts-ignore
+        httpOptions: agent ? { agent } : undefined,
+      });
       const res = await ai.models.generateContent({
         model,
         contents: prompt,
@@ -137,7 +142,11 @@ ${transcript}`;
         return res.text.trim();
       }
     } catch (err: any) {
-      console.warn(`[DIGEST] Model ${model} failed, trying next fallback...`, err?.message || err);
+      if (isApiKeyError(err)) {
+        markKeyDead(apiKey);
+      }
+      const cleanErr = sanitizeErrorMessage(err?.message || err, apiKey);
+      console.warn(`[DIGEST] Model ${model} failed, trying next fallback...`, cleanErr);
     }
   }
 

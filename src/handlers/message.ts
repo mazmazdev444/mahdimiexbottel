@@ -8,7 +8,7 @@ import { getWeather, extractWeatherIntent } from "../services/weather";
 import { getCryptoPrices } from "../services/crypto";
 import { getDollarAndGoldReport } from "../services/currency";
 import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getQuotaExceededMessage, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
-import { CONFIG, updateGeminiApiKey } from "../config";
+import { CONFIG, updateGeminiApiKey, sanitizeApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
 import { markdownToTelegramHtml, escapeHtml } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
@@ -93,7 +93,14 @@ export async function handleTextMessage(ctx: Context) {
 
   // Check if admin is pasting a Google Gemini API key directly
   if ((text.startsWith("AIzaSy") || text.startsWith("AQ.")) && isAdmin) {
-    const key = text.trim();
+    const key = sanitizeApiKey(text);
+    if (!key) {
+      await ctx.reply("⚠️ <b>فرمت کلید ارائه‌شده نامعتبر است یا حاوی کاراکترهای غیرمجاز، خط فاصله یا شکست خط است.</b>", {
+        ...replyOpts,
+        parse_mode: "HTML",
+      });
+      return;
+    }
     const res = await withTyping(ctx, () => testGeminiKey(key));
     if (res.ok) {
       updateGeminiApiKey(key);

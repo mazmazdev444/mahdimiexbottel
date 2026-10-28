@@ -9,6 +9,8 @@ import {
   maskApiKey,
   getActiveGeminiKey,
   withRetry,
+  isApiKeyError,
+  sanitizeErrorMessage,
 } from "../src/services/resilience";
 import {
   markModelCooldown,
@@ -16,6 +18,7 @@ import {
   modelCooldowns,
   getModelCandidateChain,
 } from "../src/services/ai";
+import { setSetting, getSetting } from "../src/db";
 
 describe("resilience service", () => {
   describe("API key cooldown management", () => {
@@ -100,6 +103,23 @@ describe("resilience service", () => {
       expect(sanitizeApiKey("123")).toBe(""); // too short
     });
 
+    it("should strip hidden newlines, carriage returns, BOM and zero-width characters", () => {
+      expect(sanitizeApiKey("AIzaSyValidKeyWithNewlines\r\n")).toBe("AIzaSyValidKeyWithNewlines");
+      expect(sanitizeApiKey("\r\nAIzaSyValidKeyPrefix\r\n")).toBe("AIzaSyValidKeyPrefix");
+      expect(sanitizeApiKey("﻿AIzaSyWithBOM​‌")).toBe("AIzaSyWithBOM");
+      expect(sanitizeApiKey("`AIzaSyWithBacktick`")).toBe("AIzaSyWithBacktick");
+      expect(sanitizeApiKey("“AIzaSyCurlyQuotes”")).toBe("AIzaSyCurlyQuotes");
+    });
+
+    it("should reject API keys with inner whitespace, control characters, or non-ASCII characters", () => {
+      expect(sanitizeApiKey("AIzaSy Key With Spaces")).toBe("");
+      expect(sanitizeApiKey("AIzaSyKey\x00NullByte")).toBe("");
+      expect(sanitizeApiKey("AIzaSyKeyکلیدفارسی")).toBe("");
+      expect(sanitizeApiKey("undefined")).toBe("");
+      expect(sanitizeApiKey("null")).toBe("");
+      expect(sanitizeApiKey("none")).toBe("");
+    });
+
     it("should mark revoked / 401 API keys as permanently dead in memory", () => {
       const badKey = "AIzaSyBadRevokedKey999";
       expect(isKeyDead(badKey)).toBe(false);
@@ -130,6 +150,72 @@ describe("resilience service", () => {
 
       CONFIG.GEMINI_API_KEYS = origKeys;
       resetDeadKeys();
+    });
+  });
+
+  describe("Header format error handling & error message sanitization", () => {
+    it("isApiKeyError should detect header format errors thrown by fetch/undici", () => {
+      const headerErr1 = new TypeError("Header 'x-goog-api-key' has invalid value");
+      expect(isApiKeyError(headerErr1)).toBe(true);
+
+      const headerErr2 = new Error("Header 'x-goog-api-key' contains invalid characters");
+      expect(isApiKeyError(headerErr2)).toBe(true);
+
+      const headerErr3 = new Error("Invalid header value for key");
+      expect(isApiKeyError(headerErr3)).toBe(true);
+
+      const authErr401 = { status: 401, message: "Request had invalid authentication credentials" };
+      expect(isApiKeyError(authErr401)).toBe(true);
+
+      const authErr403 = { status: 403, message: "The caller does not have permission" };
+      expect(isApiKeyError(authErr403)).toBe(true);
+
+      const apiKeyInvalid = new Error("API_KEY_INVALID: API key not valid. Please pass a valid API key.");
+      expect(isApiKeyError(apiKeyInvalid)).toBe(true);
+
+      // Normal rate limit or server error should NOT be flagged as API key error
+      const rateLimitErr = { status: 429, message: "Resource has been exhausted (e.g. check quota)." };
+      expect(isApiKeyError(rateLimitErr)).toBe(false);
+
+      const serverErr = { status: 503, message: "The service is temporarily unavailable." };
+      expect(isApiKeyError(serverErr)).toBe(false);
+    });
+
+    it("sanitizeErrorMessage should mask raw API keys and flatten newlines", () => {
+      const secret = "AIzaSyD5TestSecretKey9876";
+      const dirtyMsg = `Error: Header 'x-goog-api-key' has invalid value: ${secret}\r\nDetails on line 2\n`;
+
+      const cleaned = sanitizeErrorMessage(dirtyMsg, secret);
+      expect(cleaned).not.toContain(secret);
+      expect(cleaned).toContain("AIza...9876");
+      expect(cleaned).not.toContain("\r");
+      expect(cleaned).not.toContain("\n");
+    });
+
+    it("sanitizeErrorMessage should mask patterns matching AIza API keys", () => {
+      const rawText = "Failed with key AIzaSyABC1234567890XYZ and code 400";
+      const cleaned = sanitizeErrorMessage(rawText);
+      expect(cleaned).not.toContain("AIzaSyABC1234567890XYZ");
+      expect(cleaned).toContain("AIza...0XYZ");
+    });
+  });
+
+  describe("Database API key persistence hygiene", () => {
+    it("setSetting and getSetting should sanitize persistent gemini_api_key", () => {
+      const dirtyKey = "  'AIzaSyDbKeyWithQuotes123'\r\n ";
+      setSetting("gemini_api_key", dirtyKey);
+
+      const readBack = getSetting("gemini_api_key");
+      expect(readBack).toBe("AIzaSyDbKeyWithQuotes123");
+      expect(readBack).not.toContain("'");
+      expect(readBack).not.toContain("\r");
+      expect(readBack).not.toContain("\n");
+    });
+
+    it("setSetting should reject malformed gemini_api_key and remove it", () => {
+      setSetting("gemini_api_key", "invalid with spaces and \x00");
+      const readBack = getSetting("gemini_api_key");
+      expect(readBack).toBe("");
     });
   });
 

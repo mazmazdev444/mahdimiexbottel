@@ -90,8 +90,13 @@ if (!CONFIG.BOT_TOKEN) {
 
 // Hook up persistent Gemini API key callback
 setApiKeyUpdateCallback((key) => {
-  setSetting("gemini_api_key", key);
-  unmarkKeyDead(key);
+  const cleanKey = sanitizeApiKey(key);
+  if (cleanKey) {
+    setSetting("gemini_api_key", cleanKey);
+    unmarkKeyDead(cleanKey);
+  } else {
+    deleteSetting("gemini_api_key");
+  }
 });
 
 // Restore persistent Gemini API key from database if available
@@ -105,6 +110,9 @@ if (storedStartupKey) {
     }
     unmarkKeyDead(cleanKey);
     console.log("🔑 [CONFIG] Restored persistent Gemini API key from database.");
+  } else {
+    console.warn("⚠️ [CONFIG] Persistent Gemini API key in database is malformed. Removing stored override.");
+    deleteSetting("gemini_api_key");
   }
 }
 
@@ -760,7 +768,13 @@ bot.command(["setkey", "setkey@mazmazAgentBot"], async (ctx) => {
     );
   }
 
-  const key = parts[1].trim();
+  const rawKey = parts.slice(1).join(" ").trim();
+  const key = sanitizeApiKey(rawKey);
+  if (!key) {
+    return ctx.reply("⚠️ <b>فرمت کلید ارائه‌شده نامعتبر است یا حاوی کاراکترهای غیرمجاز، خط فاصله یا شکست خط است.</b>", {
+      parse_mode: "HTML",
+    });
+  }
   const waitMsg = await ctx.reply("🔑 <b>در حال اعتبارسنجی و تست کلید با Gemini... ⏳</b>", {
     parse_mode: "HTML",
   });

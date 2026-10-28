@@ -14,13 +14,49 @@ function getDatabasePath(): string {
 
 export function sanitizeApiKey(raw: string): string {
   if (!raw || typeof raw !== "string") return "";
-  let k = raw.trim();
-  k = k.replace(/^["'«“‘]+|["'»”’]+$/g, "").trim();
-  if (k.length < 5 || k.toLowerCase().includes("your_api_key") || k.toLowerCase().includes("placeholder")) {
+  // 1. Remove BOM, zero-width characters, and invisible unicode formatting, then trim outer whitespace
+  let k = raw.replace(new RegExp("[\\uFEFF\\u200B\\u200C\\u200D\\u2028\\u2029]", "g"), "").trim();
+  // 2. Strip surrounding quotes and formatting wrappers (single, double, curly, guillemets, backticks)
+  k = k.replace(/^["'«“‘`]+|["'»”’`]+$/g, "").trim();
+  // 3. Strip hidden carriage returns (\r), newlines (\n), and tabs (\t)
+  k = k.replace(/[\r\n\t]/g, "").trim();
+  // 4. Reject malformed keys with null bytes or control characters
+  if (/[\x00-\x1F\x7F]/.test(k)) {
+    return "";
+  }
+  // 5. API keys cannot contain internal whitespace or spaces
+  if (/\s/.test(k)) {
+    return "";
+  }
+  // 6. Filter out placeholders, short strings, and empty keywords
+  if (
+    k.length < 5 ||
+    k.toLowerCase().includes("your_api_key") ||
+    k.toLowerCase().includes("placeholder") ||
+    k.toLowerCase().includes("your_gemini_api_key") ||
+    k.toLowerCase() === "undefined" ||
+    k.toLowerCase() === "null" ||
+    k.toLowerCase() === "none"
+  ) {
+    return "";
+  }
+  // 7. Header validation: must strictly consist of valid printable ASCII API key tokens
+  if (!/^[A-Za-z0-9_\-\.]+$/.test(k)) {
     return "";
   }
   return k;
 }
+
+const initialSingleKey = sanitizeApiKey(process.env.GEMINI_API_KEY || "");
+const rawKeysString = `${process.env.GEMINI_API_KEYS || ""},${process.env.GEMINI_API_KEY || ""}`;
+const initialKeyPool = [
+  ...new Set(
+    rawKeysString
+      .split(/[\r\n,;]+/)
+      .map(sanitizeApiKey)
+      .filter(Boolean)
+  ),
+];
 
 export const CONFIG = {
   BOT_TOKEN: process.env.BOT_TOKEN || "",
@@ -33,11 +69,8 @@ export const CONFIG = {
   CREATOR_ID: 8062873417,
   PROXY_URL: process.env.PROXY_URL || "http://127.0.0.1:10808",
   USE_PROXY: process.env.USE_PROXY !== "false",
-  GEMINI_API_KEY: sanitizeApiKey(process.env.GEMINI_API_KEY || ""),
-  GEMINI_API_KEYS: (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "")
-    .split(",")
-    .map(sanitizeApiKey)
-    .filter(Boolean),
+  GEMINI_API_KEY: initialSingleKey || (initialKeyPool[0] || ""),
+  GEMINI_API_KEYS: initialKeyPool,
   AI_MODEL: process.env.AI_MODEL || "gemini-3.5-flash-lite",
   GEMINI_MODELS: (process.env.GEMINI_MODELS || "gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash")
     .split(",")
