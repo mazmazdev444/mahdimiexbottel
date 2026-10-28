@@ -1,5 +1,5 @@
 import { Context, InlineKeyboard } from "grammy";
-import { askGemini, checkProfanity, isPersian, testGeminiKey, isSensitiveExfiltrationAttempt, STOPPED_RESULT } from "../services/ai";
+import { askGemini, askGeminiStream, checkProfanity, isPersian, testGeminiKey, isSensitiveExfiltrationAttempt, STOPPED_RESULT } from "../services/ai";
 import { isMediaUrl, storeMediaUrl } from "../services/mediaDownloader";
 import { sendMusicToTelegram, extractMusicQuery } from "../services/musicService";
 import { isGeneralWebUrl, fetchAndAnalyzeLink } from "../services/linkReader";
@@ -827,12 +827,32 @@ export async function handleTextMessage(ctx: Context) {
 
   let statusMsg: any = null;
   let timer: any = null;
+  let pendingStreamTimer: any = null;
   let isDone = false;
+  let isStreaming = false;
+  const isPrivate = !isGroup;
+  const timerInterval = isPrivate ? 1000 : 5000;
+
   const statusText = hasRepliedPhoto
     ? "👁️‍🗨️ <i>در حال مشاهده تصویر ریپلای‌شده و تدوین پاسخ... ⏳</i>"
     : isForwarded && !replyMsg
     ? "📖 <i>در حال خواندن و تحلیل پیام فوروارد شده... ⏳</i>"
     : "💭 <i>در حال تفکر و تدوین پاسخ هوشمند... ⏳</i>";
+
+  const abortHandler = () => {
+    isDone = true;
+    if (pendingStreamTimer) {
+      clearTimeout(pendingStreamTimer);
+      pendingStreamTimer = null;
+    }
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (statusMsg && ctx.api?.editMessageText && ctx.chat) {
+      ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, "⛔ متوقف شد").catch(() => {});
+    }
+  };
 
   try {
     statusMsg = await ctx.reply(statusText, {
@@ -848,11 +868,15 @@ export async function handleTextMessage(ctx: Context) {
       return;
     }
 
+    controller.signal.addEventListener("abort", abortHandler, { once: true });
+
     let elapsed = 0;
     timer = setInterval(async () => {
-      elapsed += 1;
-      if (isDone || controller.signal.aborted || !ctx.chat || !statusMsg) {
-        if (timer) clearInterval(timer);
+      elapsed += isPrivate ? 1 : 5;
+      if (isDone || isStreaming || controller.signal.aborted || !ctx.chat || !statusMsg) {
+        if (isDone || controller.signal.aborted || isStreaming) {
+          if (timer) clearInterval(timer);
+        }
         return;
       }
       try {
@@ -865,7 +889,7 @@ export async function handleTextMessage(ctx: Context) {
       } catch {
         // Ignore edit errors (e.g. rate limits or network issues)
       }
-    }, 1000);
+    }, timerInterval);
 
     // دانلود عکس در صورت وجود عکس در پیام ریپلای‌شده
     let imageBase64: string | undefined = undefined;
@@ -899,9 +923,95 @@ export async function handleTextMessage(ctx: Context) {
       promptToSend += `\n[کانتکست گروه: عنوان="${ctx.chat.title || "گروه"}" | شناسه عددی چت (chat_id)=${ctx.chat.id}]`;
     }
 
-    const rawResponse = await withTyping(ctx, () => askGemini(userId, promptToSend, imageBase64, ctx, controller.signal));
+    let latestStreamText = "";
+    let lastStreamEditTime = 0;
+    let isStreamEditing = false;
+    let lastEditedStreamText = "";
+
+    const performStreamEdit = async () => {
+      if (isDone || controller.signal.aborted || !statusMsg || !ctx.chat || isStreamEditing) {
+        return;
+      }
+
+      const textToEdit = latestStreamText;
+      if (!textToEdit || textToEdit === lastEditedStreamText) {
+        return;
+      }
+
+      const truncated = textToEdit.length > 3500 ? textToEdit.slice(0, 3500) : textToEdit;
+      const content = `${truncated}▌`;
+
+      isStreamEditing = true;
+      lastStreamEditTime = Date.now();
+      lastEditedStreamText = textToEdit;
+
+      try {
+        await ctx.api.editMessageText(
+          ctx.chat.id,
+          statusMsg.message_id,
+          content
+        );
+      } catch {
+        // Ignore "message is not modified" and any edit error
+      } finally {
+        isStreamEditing = false;
+        if (!isDone && !controller.signal.aborted && latestStreamText !== lastEditedStreamText && !pendingStreamTimer) {
+          const remaining = 1500 - (Date.now() - lastStreamEditTime);
+          pendingStreamTimer = setTimeout(() => {
+            pendingStreamTimer = null;
+            performStreamEdit();
+          }, Math.max(0, remaining));
+        }
+      }
+    };
+
+    const scheduleStreamEdit = () => {
+      if (isDone || controller.signal.aborted || !statusMsg || !ctx.chat) return;
+
+      const now = Date.now();
+      const timeSinceLastEdit = now - lastStreamEditTime;
+
+      if (timeSinceLastEdit >= 1500 && !isStreamEditing) {
+        performStreamEdit();
+      } else if (!pendingStreamTimer) {
+        const delay = Math.max(0, 1500 - timeSinceLastEdit);
+        pendingStreamTimer = setTimeout(() => {
+          pendingStreamTimer = null;
+          performStreamEdit();
+        }, delay);
+      }
+    };
+
+    const onChunk = (_chunk: string, accumulated: string) => {
+      if (isDone || controller.signal.aborted) return;
+      if (!isStreaming) {
+        isStreaming = true;
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+      latestStreamText = accumulated;
+      scheduleStreamEdit();
+    };
+
+    let rawResponse: string;
+    if (isPrivate) {
+      rawResponse = await withTyping(ctx, () =>
+        askGeminiStream(userId, promptToSend, imageBase64, ctx, controller.signal, onChunk)
+      );
+    } else {
+      rawResponse = await withTyping(ctx, () =>
+        askGemini(userId, promptToSend, imageBase64, ctx, controller.signal)
+      );
+    }
 
     isDone = true;
+    controller.signal.removeEventListener("abort", abortHandler);
+    if (pendingStreamTimer) {
+      clearTimeout(pendingStreamTimer);
+      pendingStreamTimer = null;
+    }
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -955,6 +1065,11 @@ export async function handleTextMessage(ctx: Context) {
     }
   } catch (err: any) {
     isDone = true;
+    controller.signal.removeEventListener("abort", abortHandler);
+    if (pendingStreamTimer) {
+      clearTimeout(pendingStreamTimer);
+      pendingStreamTimer = null;
+    }
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -968,6 +1083,11 @@ export async function handleTextMessage(ctx: Context) {
     throw err;
   } finally {
     isDone = true;
+    controller.signal.removeEventListener("abort", abortHandler);
+    if (pendingStreamTimer) {
+      clearTimeout(pendingStreamTimer);
+      pendingStreamTimer = null;
+    }
     if (timer) {
       clearInterval(timer);
       timer = null;

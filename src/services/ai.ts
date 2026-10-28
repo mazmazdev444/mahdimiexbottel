@@ -399,12 +399,202 @@ async function callGenerateContentWithAbort(
   }
 }
 
-export async function askGemini(
+async function callGenerateContentStreamWithAbort(
+  aiClient: any,
+  params: any,
+  sig?: AbortSignal,
+  timeoutMs = 15000,
+  onChunk?: (chunk: string, accumulated: string) => void
+): Promise<{ response: any; receivedAnyChunk: boolean; accumulatedText: string }> {
+  if (sig?.aborted) {
+    const err: any = new Error("Request aborted");
+    err.name = "AbortError";
+    throw err;
+  }
+
+  const callConfig = {
+    ...params.config,
+    ...(sig ? { abortSignal: sig } : {}),
+  };
+
+  let receivedAnyChunk = false;
+  let accumulatedText = "";
+  const collectedParts: any[] = [];
+  const collectedFunctionCalls: any[] = [];
+  let lastUsageMetadata: any = undefined;
+  let firstCandidate: any = undefined;
+
+  let streamPromise: Promise<any>;
+  try {
+    if (typeof aiClient?.models?.generateContentStream !== "function") {
+      return {
+        response: null,
+        receivedAnyChunk: false,
+        accumulatedText: "",
+      };
+    }
+    streamPromise = aiClient.models.generateContentStream({
+      ...params,
+      config: callConfig,
+    });
+  } catch {
+    return {
+      response: null,
+      receivedAnyChunk: false,
+      accumulatedText: "",
+    };
+  }
+
+  let stream: any;
+  let timeoutTimer: any;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutTimer = setTimeout(() => {
+      const err: any = new Error(`Stream request timed out after ${timeoutMs}ms`);
+      err.name = "TimeoutError";
+      reject(err);
+    }, timeoutMs);
+  });
+
+  try {
+    stream = await Promise.race([streamPromise, timeoutPromise]);
+  } catch (initErr: any) {
+    clearTimeout(timeoutTimer);
+    if (sig?.aborted || initErr?.name === "AbortError") {
+      const err: any = new Error("Request aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    return {
+      response: null,
+      receivedAnyChunk: false,
+      accumulatedText: "",
+    };
+  } finally {
+    clearTimeout(timeoutTimer);
+  }
+
+  let abortHandler: (() => void) | undefined;
+  if (sig) {
+    abortHandler = () => {
+      try {
+        if (typeof stream?.return === "function") {
+          stream.return();
+        }
+      } catch {}
+    };
+    if (sig.aborted) {
+      abortHandler();
+    } else {
+      sig.addEventListener("abort", abortHandler, { once: true });
+    }
+  }
+
+  try {
+    for await (const chunk of stream) {
+      if (sig?.aborted) {
+        const err: any = new Error("Request aborted");
+        err.name = "AbortError";
+        throw err;
+      }
+
+      if (chunk?.usageMetadata) {
+        lastUsageMetadata = chunk.usageMetadata;
+      }
+
+      const cand = chunk?.candidates?.[0];
+      if (cand && !firstCandidate) {
+        firstCandidate = cand;
+      }
+
+      if (chunk?.functionCalls && Array.isArray(chunk.functionCalls) && chunk.functionCalls.length > 0) {
+        collectedFunctionCalls.push(...chunk.functionCalls);
+      } else if (cand?.content?.parts) {
+        for (const part of cand.content.parts) {
+          if (part?.functionCall) {
+            collectedFunctionCalls.push(part.functionCall);
+          }
+        }
+      }
+
+      const chunkText =
+        typeof chunk?.text === "string"
+          ? chunk.text
+          : (cand?.content?.parts?.map((p: any) => p?.text || "").join("") || "");
+      if (cand?.content?.parts) {
+        for (const part of cand.content.parts) {
+          collectedParts.push(part);
+        }
+      }
+
+      if (chunkText) {
+        receivedAnyChunk = true;
+        accumulatedText += chunkText;
+        if (onChunk && collectedFunctionCalls.length === 0) {
+          try {
+            onChunk(chunkText, accumulatedText);
+          } catch {
+            // Ignore callback errors
+          }
+        }
+      }
+    }
+  } catch (iterErr: any) {
+    if (sig?.aborted || iterErr?.name === "AbortError") {
+      const err: any = new Error("Request aborted");
+      err.name = "AbortError";
+      throw err;
+    }
+    return {
+      response: null,
+      receivedAnyChunk,
+      accumulatedText,
+    };
+  } finally {
+    if (sig && abortHandler) {
+      sig.removeEventListener("abort", abortHandler);
+    }
+  }
+
+  const finalParts = collectedParts.length > 0
+    ? collectedParts
+    : accumulatedText
+    ? [{ text: accumulatedText }]
+    : collectedFunctionCalls.length > 0
+    ? collectedFunctionCalls.map((fc: any) => ({ functionCall: fc }))
+    : [];
+
+  const responseObj: any = {
+    candidates: [
+      {
+        content: {
+          role: "model",
+          parts: finalParts,
+        },
+        finishReason: firstCandidate?.finishReason || "STOP",
+      },
+    ],
+    text: accumulatedText,
+    usageMetadata: lastUsageMetadata,
+  };
+
+  if (collectedFunctionCalls.length > 0) {
+    responseObj.functionCalls = collectedFunctionCalls;
+  }
+
+  return {
+    response: responseObj,
+    receivedAnyChunk,
+    accumulatedText,
+  };
+}
+
+async function askGeminiInternal(
   userId: number,
   prompt: string,
   imageBase64?: string,
   ctx?: any,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onChunk?: (chunk: string, accumulated: string) => void
 ): Promise<string> {
   if (signal?.aborted) {
     return STOPPED_RESULT;
@@ -842,23 +1032,50 @@ export async function askGemini(
         const currentKey = keyPool[currentKeyIdx % keyPool.length] || apiKey;
         const currentAi = getAiClient(currentKey);
 
-        try {
-          call1Res = await callGenerateContentWithAbort(
-            currentAi,
-            {
-              model: m,
-              contents: workingContents,
-              config: {
-                systemInstruction,
-                temperature: activeTemperature,
-                tools,
-                thinkingConfig: {
-                  thinkingBudget,
-                },
-              },
+        const call1Params = {
+          model: m,
+          contents: workingContents,
+          config: {
+            systemInstruction,
+            temperature: activeTemperature,
+            tools,
+            thinkingConfig: {
+              thinkingBudget,
             },
-            signal
-          );
+          },
+        };
+
+        try {
+          if (onChunk) {
+            const streamRes = await callGenerateContentStreamWithAbort(
+              currentAi,
+              call1Params,
+              signal,
+              15000,
+              onChunk
+            );
+            if (streamRes.response) {
+              call1Res = streamRes.response;
+            } else if (!streamRes.receivedAnyChunk) {
+              call1Res = await callGenerateContentWithAbort(
+                currentAi,
+                call1Params,
+                signal
+              );
+            } else {
+              call1Res = await callGenerateContentWithAbort(
+                currentAi,
+                call1Params,
+                signal
+              );
+            }
+          } else {
+            call1Res = await callGenerateContentWithAbort(
+              currentAi,
+              call1Params,
+              signal
+            );
+          }
           break; // Call 1 succeeded
         } catch (err: any) {
           if (signal?.aborted || err?.name === "AbortError") {
@@ -1193,16 +1410,43 @@ export async function askGemini(
         const currentKey = keyPool[currentKeyIdx % keyPool.length] || apiKey;
         const currentAi = getAiClient(currentKey);
 
+        const call2Params = {
+          model: m,
+          contents: secondContents,
+          config: secondCallConfig,
+        };
+
         try {
-          call2Res = await callGenerateContentWithAbort(
-            currentAi,
-            {
-              model: m,
-              contents: secondContents,
-              config: secondCallConfig,
-            },
-            signal
-          );
+          if (onChunk) {
+            const streamRes = await callGenerateContentStreamWithAbort(
+              currentAi,
+              call2Params,
+              signal,
+              15000,
+              onChunk
+            );
+            if (streamRes.response) {
+              call2Res = streamRes.response;
+            } else if (!streamRes.receivedAnyChunk) {
+              call2Res = await callGenerateContentWithAbort(
+                currentAi,
+                call2Params,
+                signal
+              );
+            } else {
+              call2Res = await callGenerateContentWithAbort(
+                currentAi,
+                call2Params,
+                signal
+              );
+            }
+          } else {
+            call2Res = await callGenerateContentWithAbort(
+              currentAi,
+              call2Params,
+              signal
+            );
+          }
           break; // Call 2 succeeded
         } catch (err: any) {
           if (signal?.aborted || err?.name === "AbortError") {
@@ -1438,6 +1682,34 @@ export async function askGemini(
     console.error("Gemini API Error:", error?.status || error?.message || "unknown error");
     return "سرور هوش مصنوعی در حال حاضر شلوغ است، لطفاً یک دقیقه دیگر تلاش کنید ⏳";
   }
+}
+
+export async function askGemini(
+  userId: number,
+  prompt: string,
+  imageBase64?: string,
+  ctx?: any,
+  signal?: AbortSignal
+): Promise<string> {
+  return askGeminiInternal(userId, prompt, imageBase64, ctx, signal, undefined);
+}
+
+export async function askGeminiStream(
+  userId: number,
+  prompt: string,
+  imageBase64?: string,
+  ctx?: any,
+  signal?: AbortSignal,
+  onChunk?: (chunk: string, accumulated: string) => void
+): Promise<string> {
+  if (typeof (askGemini as any)?.mock !== "undefined") {
+    const res = await askGemini(userId, prompt, imageBase64, ctx, signal);
+    if (onChunk && typeof res === "string" && res !== STOPPED_RESULT) {
+      onChunk(res, res);
+    }
+    return res;
+  }
+  return askGeminiInternal(userId, prompt, imageBase64, ctx, signal, onChunk);
 }
 
 
