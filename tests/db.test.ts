@@ -17,6 +17,8 @@ import {
   getSetting,
   deleteSetting,
   checkAndConsumeQuota,
+  formatQuotaFooter,
+  getQuotaExceededMessage,
   saveStateSnapshot,
   registerOrUpdateGroup,
   getGroupById,
@@ -97,6 +99,20 @@ describe("database operations", () => {
     const result = checkAndConsumeQuota(testUserId);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(9);
+  });
+
+  it("should not append quota footer on messages", () => {
+    approveUser(testUserId);
+    db.run("UPDATE users SET used_today = 1 WHERE user_id = ?", [testUserId]);
+    setUserQuota(testUserId, 10);
+    expect(formatQuotaFooter(testUserId)).toBe("");
+  });
+
+  it("should provide exact original quota exceeded message when limit is reached", () => {
+    const msg = getQuotaExceededMessage();
+    expect(msg).toContain("⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>");
+    expect(msg).toContain("شما از سهمیه ۲۴ پیام/درخواست روزانه خود استفاده کرده‌اید.");
+    expect(msg).toContain("سهمیه شما بامداد فردا مجدداً ریست و شارژ خواهد شد. 🌙");
   });
 
   it("should save, retrieve and delete settings", () => {

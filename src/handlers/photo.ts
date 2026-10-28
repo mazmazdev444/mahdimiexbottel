@@ -3,7 +3,7 @@ import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
 import { markdownToTelegramHtml } from "../utils/formatter";
 import { withTyping, sendSafeMessage } from "../utils/chunker";
-import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
+import { formatQuotaFooter, checkAndConsumeQuota, getQuotaExceededMessage } from "../db";
 import {
   downloadTelegramPhotoAsBase64,
   extractRepliedMessageContent,
@@ -49,8 +49,7 @@ export async function handlePhotoMessage(ctx: Context) {
       const quota = checkAndConsumeQuota(userId, true);
       if (!quota.allowed) {
         await ctx.reply(
-          "⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n" +
-          "سهمیه روزانه شما بامداد فردا مجدداً شارژ می‌شود. 🌙",
+          getQuotaExceededMessage(),
           {
             ...replyOpts,
             parse_mode: "HTML",

@@ -3,6 +3,7 @@ import { CONFIG } from "../config";
 import {
   registerOrUpdateUser,
   checkAndConsumeQuota,
+  getQuotaExceededMessage,
   canUserUseCommands,
   isUserBanned,
   isUserMuted,
@@ -233,15 +234,10 @@ export async function accessControlMiddleware(ctx: Context, next: NextFunction) 
     if (!isFree) {
       const quota = checkAndConsumeQuota(userId);
       if (!quota.allowed) {
-        const limitText = (
-          `⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n` +
-          `شما از سهمیه ۲۴ پیام/درخواست روزانه خود استفاده کرده‌اید.\n` +
-          `سهمیه شما بامداد فردا مجدداً ریست و شارژ خواهد شد. 🌙`
-        );
         if (ctx.callbackQuery) {
           await ctx.answerCallbackQuery({ text: "سهمیه پیام امروز شما تمام شده است.", show_alert: true }).catch(() => {});
         } else {
-          await ctx.reply(limitText, { parse_mode: "HTML" });
+          await ctx.reply(getQuotaExceededMessage(), { parse_mode: "HTML" });
         }
         return;
       }

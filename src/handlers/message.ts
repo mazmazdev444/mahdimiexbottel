@@ -7,7 +7,7 @@ import { queryBenchmark } from "../services/benchmarks";
 import { getWeather, extractWeatherIntent } from "../services/weather";
 import { getCryptoPrices } from "../services/crypto";
 import { getDollarAndGoldReport } from "../services/currency";
-import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
+import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getQuotaExceededMessage, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
 import { CONFIG, updateGeminiApiKey } from "../config";
 import { sendSafeMessage, withTyping } from "../utils/chunker";
 import { markdownToTelegramHtml, escapeHtml } from "../utils/formatter";
@@ -632,9 +632,7 @@ export async function handleTextMessage(ctx: Context) {
     const quota = checkAndConsumeQuota(userId, true);
     if (!quota.allowed) {
       await ctx.reply(
-        "⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n" +
-        "شما از سهمیه ۲۴ درخواست روزانه خود استفاده کرده‌اید.\n" +
-        "سهمیه شما بامداد فردا مجدداً شارژ خواهد شد. 🌙",
+        getQuotaExceededMessage(),
         {
           ...replyOpts,
           parse_mode: "HTML",

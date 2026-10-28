@@ -235,13 +235,30 @@ restoreStateSnapshot();
 
 
 
+export function getTodayDateStr(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function getQuotaExceededMessage(): string {
+  return (
+    "⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n" +
+    "شما از سهمیه ۲۴ پیام/درخواست روزانه خود استفاده کرده‌اید.\n" +
+    "سهمیه شما بامداد فردا مجدداً ریست و شارژ خواهد شد. 🌙"
+  );
+}
+
 export function registerOrUpdateUser(
   userId: number,
   username: string,
   firstName: string,
   lastName = ""
 ) {
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getTodayDateStr();
   const isAdmin = CONFIG.ADMIN_IDS.includes(userId);
 
   const user = db
@@ -311,7 +328,7 @@ export function checkAndConsumeQuota(userId: number, isGroup = false): {
     return { allowed: true, reason: "admin", remaining: 999999 };
   }
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getTodayDateStr();
   const user = db
     .query("SELECT * FROM users WHERE user_id = ?")
     .get(userId) as any;
@@ -343,7 +360,7 @@ export function getUserQuotaInfo(userId: number): { remaining: number; dailyQuot
   if (CONFIG.ADMIN_IDS.includes(userId)) {
     return { remaining: 999999, dailyQuota: 999999, isAdmin: true };
   }
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getTodayDateStr();
   const user = db.query("SELECT * FROM users WHERE user_id = ?").get(userId) as any;
   if (!user) return { remaining: CONFIG.DEFAULT_DAILY_QUOTA, dailyQuota: CONFIG.DEFAULT_DAILY_QUOTA, isAdmin: false };
   let usedToday = user.used_today || 0;
@@ -352,12 +369,8 @@ export function getUserQuotaInfo(userId: number): { remaining: number; dailyQuot
   return { remaining: Math.max(0, dailyQuota - usedToday), dailyQuota, isAdmin: false };
 }
 
-export function formatQuotaFooter(userId: number): string {
-  if (CONFIG.ADMIN_IDS.includes(userId)) {
-    return "";
-  }
-  const info = getUserQuotaInfo(userId);
-  return `\n\n──────────────\n📊 <b>سهمیه باقی‌مانده امروز:</b> <code>${info.remaining}/${info.dailyQuota}</code>`;
+export function formatQuotaFooter(_userId: number): string {
+  return "";
 }
 
 export function approveUser(userId: number, quota = CONFIG.DEFAULT_DAILY_QUOTA) {

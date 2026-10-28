@@ -3,7 +3,7 @@ import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
 import { markdownToTelegramHtml } from "../utils/formatter";
 import { withTyping } from "../utils/chunker";
-import { formatQuotaFooter, checkAndConsumeQuota } from "../db";
+import { formatQuotaFooter, checkAndConsumeQuota, getQuotaExceededMessage } from "../db";
 import { formatReplyContext } from "../utils/replyContext";
 
 export function buildStickerPrompt(emoji?: string): string {
@@ -44,8 +44,7 @@ export async function handleStickerMessage(ctx: Context) {
       const quota = checkAndConsumeQuota(userId, true);
       if (!quota.allowed) {
         await ctx.reply(
-          "⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n" +
-          "سهمیه روزانه شما بامداد فردا مجدداً شارژ می‌شود. 🌙",
+          getQuotaExceededMessage(),
           {
             ...replyOpts,
             parse_mode: "HTML",
@@ -129,8 +128,7 @@ export async function handleAnimationMessage(ctx: Context) {
       const quota = checkAndConsumeQuota(userId, true);
       if (!quota.allowed) {
         await ctx.reply(
-          "⚠️ <b>سهمیه پیام امروز شما به پایان رسیده است!</b>\n\n" +
-          "سهمیه روزانه شما بامداد فردا مجدداً شارژ می‌شود. 🌙",
+          getQuotaExceededMessage(),
           {
             ...replyOpts,
             parse_mode: "HTML",
