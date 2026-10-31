@@ -300,5 +300,34 @@ describe("Telegram Bot API 10.0 Guest Mode", () => {
       expect(ALLOWED_UPDATES).toContain("message");
       expect(ALLOWED_UPDATES).toContain("callback_query");
     });
+
+    it("should log [UPDATE RECV] in entry middleware on incoming update", async () => {
+      const { bot } = await import("../src/index");
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (...args: any[]) => {
+        logs.push(args.join(" "));
+        originalLog(...args);
+      };
+
+      const testUpdate = {
+        update_id: 123456,
+        guest_message: {
+          guest_query_id: "test_recv_qid",
+          text: "@mazmazAgentBot",
+          from: { id: 112233 },
+        },
+      };
+
+      // Mock bot.me if undefined
+      (bot as any).me = { id: 8715729332, username: "mazmazAgentBot" };
+
+      await bot.handleUpdate(testUpdate as any);
+
+      console.log = originalLog;
+
+      expect(logs.some((l) => l.includes("[UPDATE RECV] 123456"))).toBe(true);
+      expect(logs.some((l) => l.includes("guest_message"))).toBe(true);
+    });
   });
 });
