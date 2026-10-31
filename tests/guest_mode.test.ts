@@ -245,5 +245,60 @@ describe("Telegram Bot API 10.0 Guest Mode", () => {
 
       askSpy.mockRestore();
     });
+
+    it("should safely extract guest_query_id from ctx.guestMessage and support ctx.api.answerGuestQuery", async () => {
+      const adminId = 8062873417;
+      const directApiCalls: any[] = [];
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (...args: any[]) => {
+        logs.push(args.join(" "));
+        originalLog(...args);
+      };
+
+      const guestMsg = {
+        guest_query_id: "ctx_guest_qid_999",
+        text: "@mazmazAgentBot راهنمای تست",
+        from: { id: adminId, username: "admin_user", first_name: "Admin" },
+      };
+
+      const ctx: any = {
+        update: { update_id: 9991 },
+        guestMessage: guestMsg,
+        from: guestMsg.from,
+        me: { id: 8715729332, username: "mazmazAgentBot" },
+        api: {
+          answerGuestQuery: async (qid: string, res: any) => {
+            directApiCalls.push({ qid, res });
+            return true;
+          },
+        },
+      };
+
+      const askSpy = spyOn(aiModule, "askGemini").mockImplementation(async () => "پاسخ مستقیم");
+
+      await handleGuestMessage(ctx);
+
+      console.log = originalLog;
+      askSpy.mockRestore();
+
+      expect(directApiCalls.length).toBe(1);
+      expect(directApiCalls[0].qid).toBe("ctx_guest_qid_999");
+      expect(directApiCalls[0].res.type).toBe("article");
+      expect(directApiCalls[0].res.input_message_content.message_text).toContain("پاسخ مستقیم");
+
+      // Verify debug logging
+      expect(logs.some((l) => l.includes("[GUEST] Received guest message update from user"))).toBe(true);
+      expect(logs.some((l) => l.includes("ctx_guest_qid_999"))).toBe(true);
+    });
+
+    it("should export ALLOWED_UPDATES containing guest_message, inline_query, message, callback_query", async () => {
+      const { ALLOWED_UPDATES } = await import("../src/index");
+      expect(ALLOWED_UPDATES).toBeDefined();
+      expect(ALLOWED_UPDATES).toContain("guest_message" as any);
+      expect(ALLOWED_UPDATES).toContain("inline_query");
+      expect(ALLOWED_UPDATES).toContain("message");
+      expect(ALLOWED_UPDATES).toContain("callback_query");
+    });
   });
 });

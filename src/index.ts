@@ -2211,6 +2211,18 @@ process.once("SIGTERM", async () => {
 });
 
 // اجرای ربات با مکانیزم ضد کرش و تلاش مجدد هوشمند در برابر تداخل 409 کانتینرها
+// Explicit allowed_updates ensuring Telegram delivers guest_message, inline_query, message, callback_query
+export const ALLOWED_UPDATES = [
+  "message",
+  "edited_message",
+  "callback_query",
+  "my_chat_member",
+  "chat_member",
+  "guest_message" as any,
+  "inline_query",
+  "business_message" as any,
+];
+
 async function launchBotWithResilience() {
   const maxRetries = 10;
   let attempt = 0;
@@ -2322,16 +2334,7 @@ async function launchBotWithResilience() {
       activeRunner = run(bot, {
         runner: {
           fetch: {
-            allowed_updates: [
-              "message",
-              "edited_message",
-              "callback_query",
-              "my_chat_member",
-              "chat_member",
-              "guest_message" as any,
-              "inline_query",
-              "business_message" as any,
-            ],
+            allowed_updates: ALLOWED_UPDATES,
           },
         },
       });

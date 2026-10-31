@@ -11,28 +11,38 @@ import { formatReplyContext, stripLeadingWakeWord } from "../utils/replyContext"
  */
 export async function handleGuestMessage(ctx: Context): Promise<void> {
   const updateAny = ctx.update as any;
-  const guestMessage = updateAny?.guest_message || (ctx as any).msg;
+  const guestMessage =
+    updateAny?.guest_message ||
+    (ctx as any).guestMessage ||
+    (ctx as any).msg;
+
   if (!guestMessage) return;
 
-  const guestQueryId = guestMessage.guest_query_id;
+  const guestQueryId =
+    updateAny?.guest_message?.guest_query_id ||
+    (ctx as any).guestMessage?.guest_query_id ||
+    guestMessage.guest_query_id;
+
   if (!guestQueryId) {
-    console.warn("[GUEST MODE] Received guest_message without guest_query_id:", guestMessage);
+    console.warn("[GUEST] Received guest_message update without guest_query_id:", guestMessage);
     return;
   }
 
-  const caller = guestMessage.guest_bot_caller_user || guestMessage.from;
+  const caller = guestMessage.guest_bot_caller_user || guestMessage.from || ctx.from;
   const callerId = caller?.id || 0;
+  const callerName = caller?.username ? `@${caller.username}` : (caller?.first_name || "Unknown");
+  const rawText = guestMessage.text || guestMessage.caption || "";
+
+  console.log(`[GUEST] Received guest message update from user ${callerName} (${callerId}) with query_id ${guestQueryId}: "${rawText.slice(0, 100)}"`);
 
   // Strict Admin-Only check: ignore non-admins without calling Gemini
   const isAdmin = CONFIG.ADMIN_IDS.includes(callerId) || callerId === 8062873417;
   if (!isAdmin) {
+    console.log(`[GUEST] Ignored guest message update from non-admin user ${callerName} (${callerId})`);
     return;
   }
 
-  // 1. Extract raw query text
-  const rawText = guestMessage.text || guestMessage.caption || "";
-
-  // 2. Strip bot @mention (@mazmazAgentBot) and leading wake words
+  // 1. Extract raw query text and strip bot username & wake words
   const botUsername = ctx.me?.username || "mazmazAgentBot";
   let cleanedQuery = rawText.replace(new RegExp(`@${botUsername}\\b[،,:.!؟?\\s]*`, "gi"), " ").trim();
   cleanedQuery = cleanedQuery.replace(/\s+/g, " ").trim();
@@ -43,11 +53,11 @@ export async function handleGuestMessage(ctx: Context): Promise<void> {
     cleanedQuery = "سلام";
   }
 
-  // 3. Extract reply_to_message context if present
+  // 2. Extract reply_to_message context if present
   const replyContext = formatReplyContext(cleanedQuery, guestMessage.reply_to_message);
   const finalPrompt = replyContext.prompt;
 
-  // 4. One-shot non-streaming AI call without status edits or streaming
+  // 3. One-shot non-streaming AI call without status edits or streaming
   let aiResponse = "";
   try {
     aiResponse = await askGemini(
@@ -61,7 +71,7 @@ export async function handleGuestMessage(ctx: Context): Promise<void> {
       }
     );
   } catch (err: any) {
-    console.warn("[GUEST MODE] AI generation failed:", err?.message || err);
+    console.warn(`[GUEST] AI generation failed for query_id ${guestQueryId}:`, err?.message || err);
     aiResponse = "متأسفانه در حال حاضر امکان پردازش درخواست وجود ندارد. لطفاً مجدداً تلاش کنید.";
   }
 
@@ -69,15 +79,15 @@ export async function handleGuestMessage(ctx: Context): Promise<void> {
     aiResponse = "پاسخی از هوش مصنوعی دریافت نشد.";
   }
 
-  // 5. Format and cap output safely for a single self-contained card (Telegram 4096 char limit)
+  // 4. Format and cap output safely for a single self-contained card (Telegram 4096 char limit)
   if (aiResponse.length > 3800) {
     aiResponse = aiResponse.slice(0, 3800) + "\n\n...(ادامه پاسخ به دلیل محدودیت کارت خلاصه شد)";
   }
 
   const formattedHtml = markdownToTelegramHtml(aiResponse);
 
-  const articleResult = {
-    type: "article",
+  const articleResult: any = {
+    type: "article" as const,
     id: String(guestQueryId),
     title: "پاسخ مزمز",
     input_message_content: {
@@ -85,28 +95,34 @@ export async function handleGuestMessage(ctx: Context): Promise<void> {
       parse_mode: "HTML" as const,
     },
   };
+  articleResult.results = [articleResult];
 
-  // 6. Deliver answer strictly via answerGuestQuery
+  // 5. Deliver answer strictly via answerGuestQuery
   try {
     const rawApi = (ctx.api as any)?.raw;
-    if (typeof rawApi?.answerGuestQuery === "function") {
+    if (typeof (ctx as any).answerGuestQuery === "function") {
+      try {
+        await (ctx as any).answerGuestQuery(articleResult);
+      } catch {
+        await (ctx as any).answerGuestQuery({ results: [articleResult], result: articleResult });
+      }
+    } else if (typeof (ctx.api as any)?.answerGuestQuery === "function") {
+      try {
+        await (ctx.api as any).answerGuestQuery(guestQueryId, articleResult);
+      } catch {
+        await (ctx.api as any).answerGuestQuery(guestQueryId, { results: [articleResult], result: articleResult });
+      }
+    } else if (typeof rawApi?.answerGuestQuery === "function") {
       await rawApi.answerGuestQuery({
         guest_query_id: guestQueryId,
         result: articleResult,
+        results: [articleResult],
       });
-    } else if (typeof (ctx.api as any)?.answerGuestQuery === "function") {
-      try {
-        await (ctx.api as any).answerGuestQuery({
-          guest_query_id: guestQueryId,
-          result: articleResult,
-        });
-      } catch {
-        await (ctx.api as any).answerGuestQuery(guestQueryId, articleResult);
-      }
     } else {
-      console.warn("[GUEST MODE] Neither ctx.api.raw.answerGuestQuery nor ctx.api.answerGuestQuery found.");
+      console.warn(`[GUEST] Neither ctx.api.raw.answerGuestQuery nor ctx.api.answerGuestQuery found for query_id ${guestQueryId}`);
     }
+    console.log(`[GUEST] Successfully sent answerGuestQuery response for query_id ${guestQueryId} to user ${callerName} (${callerId})`);
   } catch (apiErr: any) {
-    console.error("[GUEST MODE] Failed to send answerGuestQuery:", apiErr?.message || apiErr);
+    console.error(`[GUEST] Failed to send answerGuestQuery for query_id ${guestQueryId}:`, apiErr?.message || apiErr);
   }
 }
