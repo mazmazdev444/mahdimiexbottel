@@ -13,6 +13,8 @@ import { handlePhotoMessage } from "./handlers/photo";
 import { handleTextMessage, runningTasks } from "./handlers/message";
 import { handleStickerMessage, handleAnimationMessage } from "./handlers/sticker";
 import { handleGuestMessage } from "./handlers/guest";
+import { handleInlineQuery } from "./handlers/inline";
+import { handleBusinessMessage } from "./handlers/business";
 import { getSequentialKey } from "./utils/sequentialKey";
 import {
   getUserCount,
@@ -147,6 +149,12 @@ setupTrackingMiddleware(bot);
 
 // 0.8 Register Guest Mode Handler (Telegram Bot API 10.0 guest_message -> answerGuestQuery)
 bot.on("guest_message" as any, handleGuestMessage);
+
+// 0.9 Register Exclusive Admin Inline Mode Handler
+bot.on("inline_query", handleInlineQuery);
+
+// 0.95 Register Exclusive Admin Business / Secretary Mode Handler
+bot.on("business_message" as any, handleBusinessMessage);
 
 // 1. Register Global Access Control & Quota Middleware
 bot.use(accessControlMiddleware);
@@ -2316,6 +2324,8 @@ async function launchBotWithResilience() {
               "my_chat_member",
               "chat_member",
               "guest_message" as any,
+              "inline_query",
+              "business_message" as any,
             ],
           },
         },
