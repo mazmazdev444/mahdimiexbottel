@@ -1,3 +1,100 @@
+function extractBalancedBraces(str: string, startIndex: number): { content: string; endIndex: number } | null {
+  if (str[startIndex] !== "{") return null;
+  let depth = 0;
+  for (let i = startIndex; i < str.length; i++) {
+    if (str[i] === "{") depth++;
+    else if (str[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        return {
+          content: str.slice(startIndex + 1, i),
+          endIndex: i,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+function replaceFracs(str: string): string {
+  let res = str;
+  let idx = res.indexOf("\\frac{");
+  let safety = 0;
+  while (idx !== -1 && safety++ < 50) {
+    const num = extractBalancedBraces(res, idx + 5);
+    if (!num) break;
+    let denomStart = num.endIndex + 1;
+    while (res[denomStart] && /\s/.test(res[denomStart])) denomStart++;
+    if (res[denomStart] !== "{") break;
+    const denom = extractBalancedBraces(res, denomStart);
+    if (!denom) break;
+    const cleanNum = replaceFracs(num.content);
+    const cleanDenom = replaceFracs(denom.content);
+    res = res.slice(0, idx) + `(${cleanNum})/(${cleanDenom})` + res.slice(denom.endIndex + 1);
+    idx = res.indexOf("\\frac{");
+  }
+  return res;
+}
+
+function replaceSqrt(str: string): string {
+  let res = str;
+  let idx = res.indexOf("\\sqrt{");
+  let safety = 0;
+  while (idx !== -1 && safety++ < 50) {
+    const inner = extractBalancedBraces(res, idx + 5);
+    if (!inner) break;
+    const cleanInner = replaceSqrt(inner.content);
+    res = res.slice(0, idx) + `√(${cleanInner})` + res.slice(inner.endIndex + 1);
+    idx = res.indexOf("\\sqrt{");
+  }
+  return res;
+}
+
+/**
+ * Transforms raw LaTeX math syntax into clean, standard Unicode math symbols
+ * readable in plain monospace text without raw LaTeX tags or messy macros.
+ */
+export function cleanLatexToUnicode(raw: string): string {
+  if (!raw) return "";
+  let m = raw.trim();
+  m = replaceFracs(m);
+  m = replaceSqrt(m);
+  m = m.replace(/\\sqrt/g, "√");
+  m = m.replace(/\\int/g, "∫");
+  m = m.replace(/\\sum/g, "∑");
+  m = m.replace(/\\prod/g, "∏");
+  m = m.replace(/\\infty/g, "∞");
+  m = m.replace(/\\pm/g, "±");
+  m = m.replace(/\\mp/g, "∓");
+  m = m.replace(/\\times/g, "×");
+  m = m.replace(/\\cdot/g, "·");
+  m = m.replace(/\\div/g, "÷");
+  m = m.replace(/\\leq?/g, "≤");
+  m = m.replace(/\\geq?/g, "≥");
+  m = m.replace(/\\neq?/g, "≠");
+  m = m.replace(/\\approx/g, "≈");
+  m = m.replace(/\\(?:implies|Longrightarrow)/g, "⟹");
+  m = m.replace(/\\(?:iff|Longleftrightarrow)/g, "⟺");
+  m = m.replace(/\\(?:to|rightarrow)/g, "→");
+  m = m.replace(/\\leftarrow/g, "←");
+  m = m.replace(/\\pi/g, "π");
+  m = m.replace(/\\alpha/g, "α");
+  m = m.replace(/\\beta/g, "β");
+  m = m.replace(/\\gamma/g, "γ");
+  m = m.replace(/\\theta/g, "θ");
+  m = m.replace(/\\lambda/g, "λ");
+  m = m.replace(/\\sigma/g, "σ");
+  m = m.replace(/\\omega/g, "ω");
+  m = m.replace(/\\Delta/g, "Δ");
+  m = m.replace(/\\(?:text|mathrm|mathbf)\{([^{}]+)\}/g, "$1");
+  m = m.replace(/\\(?:left|right)/g, "");
+  m = m.replace(/\\(?:quad|qquad)/g, "  ");
+  m = m.replace(/\\\\/g, "\n");
+  m = m.replace(/[_^]\{([^{}]+)\}/g, (match, inner) => match[0] + inner);
+  m = m.replace(/\\([{}])/g, "$1");
+  return m.trim();
+}
+
 /**
  * Converts standard Markdown into valid, Telegram-compliant HTML.
  * Handles escaping of special characters, headers, bold, italics, links,
@@ -54,6 +151,52 @@ export function markdownToTelegramHtml(markdown: string): string {
     inlineCodes.push(`<code>${escaped}</code>`);
     return `§§§IC${index}§§§`;
   });
+
+  // 2.1 Convert display LaTeX math ($$...$$ or \[...\]) outside code blocks into clean fenced code blocks
+  formatted = formatted.replace(/(?:\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\])/g, (_, m1, m2) => {
+    const rawMath = m1 || m2 || "";
+    const cleaned = cleanLatexToUnicode(rawMath);
+    const escaped = cleaned
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const index = codeBlocks.length;
+    codeBlocks.push(`<pre><code class="language-text">${escaped}</code></pre>`);
+    return `\n§§§CB${index}§§§\n`;
+  });
+
+  // 2.2 Convert inline LaTeX math (\(...\) or $formula$) outside code blocks into clean inline code
+  formatted = formatted.replace(/\\\(([\s\S]+?)\\\)/g, (_, math) => {
+    const cleaned = cleanLatexToUnicode(math);
+    const escaped = cleaned
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const index = inlineCodes.length;
+    inlineCodes.push(`<code>${escaped}</code>`);
+    return `§§§IC${index}§§§`;
+  });
+
+  // Convert inline $formula$ where formula contains mathematical symbols (ignoring currency like $100 or $5.50)
+  formatted = formatted.replace(/(?<!\w|\$)\$([^\$\n]+?)\$(?!\w|\$)/g, (match, math) => {
+    if (/^\s*\d+(?:[\.,]\d+)?\s*$/.test(math)) {
+      return match;
+    }
+    if (/[=+\-*/^\\_±√∫≤≥≠≈→⟹π∑∞α-ωA-Za-z]/.test(math)) {
+      const cleaned = cleanLatexToUnicode(math);
+      const escaped = cleaned
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      const index = inlineCodes.length;
+      inlineCodes.push(`<code>${escaped}</code>`);
+      return `§§§IC${index}§§§`;
+    }
+    return match;
+  });
+
+  // 2.3 Markdown & Parser Safety: remove trailing raw backslashes at end of lines
+  formatted = formatted.replace(/\\+(\s*)$/gm, "$1");
 
   // 3. Escape HTML special characters in the text
   formatted = formatted

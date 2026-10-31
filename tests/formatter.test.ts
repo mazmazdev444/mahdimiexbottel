@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { markdownToTelegramHtml, escapeHtml } from "../src/utils/formatter";
+import { markdownToTelegramHtml, escapeHtml, cleanLatexToUnicode } from "../src/utils/formatter";
 
 describe("formatter utils", () => {
   describe("escapeHtml", () => {
@@ -9,6 +9,92 @@ describe("formatter utils", () => {
 
     it("should return empty string on empty input", () => {
       expect(escapeHtml("")).toBe("");
+    });
+  });
+
+  describe("cleanLatexToUnicode", () => {
+    it("should convert LaTeX fractions to readable division", () => {
+      expect(cleanLatexToUnicode("\\frac{a + 1}{b - 1}")).toBe("(a + 1)/(b - 1)");
+    });
+
+    it("should convert square roots and nested square roots to Unicode", () => {
+      expect(cleanLatexToUnicode("\\sqrt{b^2 - 4ac}")).toBe("√(b^2 - 4ac)");
+      expect(cleanLatexToUnicode("\\sqrt{\\sqrt{x}}")).toBe("√(√(x))");
+    });
+
+    it("should convert common math symbols to standard clean Unicode", () => {
+      const latex = "\\int x dx \\pm \\sum y \\approx \\infty \\times z \\cdot w \\le 10 \\ge 5 \\neq 0 \\implies a \\to b";
+      const result = cleanLatexToUnicode(latex);
+      expect(result).toContain("∫");
+      expect(result).toContain("±");
+      expect(result).toContain("∑");
+      expect(result).toContain("≈");
+      expect(result).toContain("∞");
+      expect(result).toContain("×");
+      expect(result).toContain("·");
+      expect(result).toContain("≤");
+      expect(result).toContain("≥");
+      expect(result).toContain("≠");
+      expect(result).toContain("⟹");
+      expect(result).toContain("→");
+    });
+
+    it("should convert Greek letters to Unicode", () => {
+      const latex = "\\pi + \\alpha + \\beta + \\theta + \\lambda + \\Delta";
+      const result = cleanLatexToUnicode(latex);
+      expect(result).toContain("π");
+      expect(result).toContain("α");
+      expect(result).toContain("β");
+      expect(result).toContain("θ");
+      expect(result).toContain("λ");
+      expect(result).toContain("Δ");
+    });
+  });
+
+  describe("Telegram-Safe Math & Code Formatting in markdownToTelegramHtml", () => {
+    it("should convert display LaTeX math ($$...$$) into fenced monospace code block", () => {
+      const md = "فرمول مشهور:\n$$\n\\int_{0}^{1} x^2 dx = \\frac{1}{3}\n$$\nتوضیحات تکمیلی";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain('<pre><code class="language-text">');
+      expect(html).toContain("∫_0^1 x^2 dx = (1)/(3)");
+      expect(html).toContain("</code></pre>");
+      expect(html).not.toContain("$$");
+    });
+
+    it("should convert bracket display LaTeX math (\\[...\\]) into fenced code block", () => {
+      const md = "\\[ x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a} \\]";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain('<pre><code class="language-text">');
+      expect(html).toContain("x = (-b ± √(b^2 - 4ac))/(2a)");
+      expect(html).toContain("</code></pre>");
+    });
+
+    it("should convert inline LaTeX math (\\(...\\)) into inline code", () => {
+      const md = "مقدار \\(E = mc^2\\) نسبیتی است.";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain("<code>E = mc^2</code>");
+      expect(html).not.toContain("\\(");
+    });
+
+    it("should convert inline $formula$ into inline code while preserving currency $100", () => {
+      const md = "قیمت این پکیج $100 است ولی رابطه فیزیکی $F = m \\cdot a$ است.";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain("$100");
+      expect(html).toContain("<code>F = m · a</code>");
+    });
+
+    it("should remove trailing raw backslashes at end of lines outside code blocks", () => {
+      const md = "خط اول با بک‌اسلش انتهایی \\\nخط دوم عادی";
+      const html = markdownToTelegramHtml(md);
+      expect(html).not.toContain("\\\n");
+      expect(html).toContain("خط اول با بک‌اسلش انتهایی");
+    });
+
+    it("should not alter existing fenced code blocks", () => {
+      const md = "```python\n# This is already a code block with $$ or \\frac\nval = 10\n```";
+      const html = markdownToTelegramHtml(md);
+      expect(html).toContain('<pre><code class="language-python">');
+      expect(html).toContain("val = 10");
     });
   });
 
