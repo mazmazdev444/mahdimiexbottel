@@ -9,6 +9,7 @@ import {
   getActivePowerLevel,
   isSearchIntentQuery,
 } from "../src/services/ai";
+import { purifySearchQuery } from "../src/services/webSearch";
 import { matchModelName } from "../src/index";
 import { extractMusicQuery, resolveSpotifyTrack } from "../src/services/musicService";
 import { isMediaUrl, storeMediaUrl, getMediaUrl } from "../src/services/mediaDownloader";
@@ -131,6 +132,39 @@ describe("ai service helpers", () => {
       expect(isSearchIntentQuery("سلام حالت چطوره")).toBe(false);
       expect(isSearchIntentQuery("یک شعر زیبا برام بنویس")).toBe(false);
       expect(isSearchIntentQuery("explain recursion in python")).toBe(false);
+    });
+  });
+
+  describe("purifySearchQuery (Query Purity & Exact Version Fidelity)", () => {
+    it("should strip Persian conversational prefixes and suffixes", () => {
+      const dirty = "سلام مزمز جان لطفا جدیدترین مدل‌های gemini رو بهم بگو؟";
+      expect(purifySearchQuery(dirty)).toBe("جدیدترین مدل‌های gemini");
+    });
+
+    it("should strip English conversational prefixes and suffixes", () => {
+      const dirty = "Can you please tell me about deepseek v3 release date?";
+      expect(purifySearchQuery(dirty)).toBe("deepseek v3 release date");
+    });
+
+    it("should strictly preserve exact version numbers without substitution or alias", () => {
+      expect(purifySearchQuery("اطلاعات انتشار bun v1.4.2")).toBe("اطلاعات انتشار bun v1.4.2");
+      expect(purifySearchQuery("what is new in gemini 3.8-flash?")).toBe("new in gemini 3.8-flash");
+      expect(purifySearchQuery("specs of claude 3.7 sonnet")).toBe("specs of claude 3.7 sonnet");
+    });
+
+    it("should strip question marks and punctuation artifacts from query", () => {
+      expect(purifySearchQuery("قیمت لحظه‌ای تتر چنده؟")).toBe("قیمت لحظه‌ای تتر");
+      expect(purifySearchQuery("latest python features?!")).toBe("latest python features");
+    });
+
+    it("should leave already pure technical queries intact", () => {
+      expect(purifySearchQuery("bun test --coverage")).toBe("bun test --coverage");
+      expect(purifySearchQuery("docker compose up -d")).toBe("docker compose up -d");
+    });
+
+    it("should handle empty or whitespace input safely", () => {
+      expect(purifySearchQuery("")).toBe("");
+      expect(purifySearchQuery("   ")).toBe("");
     });
   });
 
