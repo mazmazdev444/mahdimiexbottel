@@ -236,12 +236,75 @@ async function searchGoogleNews(query: string, maxResults: number): Promise<stri
 }
 
 /**
+ * Query Purity: Extracts purely technical keywords and entities from search queries.
+ * Strips conversational noise, greetings, politeness markers, and trailing question marks,
+ * while strictly preserving technical version numbers (e.g. v3.8, 1.4.2) and core domain terms.
+ */
+export function purifySearchQuery(raw: string): string {
+  if (!raw || typeof raw !== "string") return "";
+  let query = raw.trim();
+
+  // Strip leading conversational phrases iteratively
+  const conversationalPrefixes = [
+    /^(?:سلام|درود|خسته نباشید?|وقت بخیر)\s*/i,
+    /^(?:مزمز|ربات|عزیز|جان)\s*/i,
+    /^(?:لطف[ااً]|میشه|می‌شه|بی[\s‌]*زحمت|ممنون میشم|میخواستم بدونم|می‌خواستم بدونم)\s*/i,
+    /^(?:بهم بگو|اطلاعاتی در مورد|درباره|راجع به|در خصوص)\s*/i,
+    /^(?:آیا (?:میدونی|می‌دونی|اطلاع داری)|وضعیت)\s*/i,
+    /^(?:hello|hi|hey)\s*/i,
+    /^(?:bot|mazmaz|dear)\s*/i,
+    /^(?:please|could you|can you)\s*/i,
+    /^(?:tell me about|what is(?: the)?|what are(?: the)?|do you know about|search for)\s*/i,
+  ];
+
+  let changed = true;
+  let loops = 0;
+  while (changed && loops++ < 10) {
+    changed = false;
+    for (const prefix of conversationalPrefixes) {
+      if (prefix.test(query)) {
+        query = query.replace(prefix, "").trim();
+        changed = true;
+      }
+    }
+  }
+
+  // Strip trailing conversational suffixes / gratitude
+  const conversationalSuffixes = [
+    /[\s،,]*(?:دستت درد نکنه|ممنون|تشکر|لطف[ااً]|رو برام بگو|رو بهم بگو|چیه|چطوره|چنده)\s*[؟?!\.]*$/i,
+    /[\s,]*(?:please|thanks|thank you|asap)\s*[?!.]*$/i,
+  ];
+
+  changed = true;
+  loops = 0;
+  while (changed && loops++ < 10) {
+    changed = false;
+    for (const suffix of conversationalSuffixes) {
+      if (suffix.test(query)) {
+        query = query.replace(suffix, "").trim();
+        changed = true;
+      }
+    }
+  }
+
+  // Strip trailing punctuation artifacts
+  query = query.replace(/[؟?!\.,;]+$/g, "").trim();
+
+  // If over-cleaned, revert to original trimmed query without trailing punctuation
+  if (!query) {
+    query = raw.trim().replace(/[؟?!\.,;]+$/g, "").trim();
+  }
+
+  return query;
+}
+
+/**
  * Token-optimized multi-tier web search:
  * Strictly caps output length to ~1,200 characters (~300 tokens) to prevent LLM bloat.
  */
 export async function searchWeb(query: string, maxResults = 3): Promise<string> {
   return await runToolWithLogger("SEARCH", query, async () => {
-    const cleanQuery = query.trim().slice(0, 120);
+    const cleanQuery = purifySearchQuery(query).slice(0, 120);
     if (!cleanQuery) return "عبارت جستجو خالی است.";
 
     let output = "";
@@ -325,9 +388,10 @@ export async function executeWebSearch(
   query: string,
   limit = 4
 ): Promise<{ ok: boolean; data?: Array<{ title: string; url: string; snippet: string }>; error?: string }> {
+  const cleanQuery = purifySearchQuery(query);
   // scrape first results page directly; upgrade to serp API if bot hits rate limits
   try {
-    const searchResults = await search(query, {
+    const searchResults = await search(cleanQuery, {
       safeSearch: SafeSearchType.OFF
     });
 
@@ -345,14 +409,14 @@ export async function executeWebSearch(
 
   // Fallback to our multi-tier search engine (Tavily, DuckDuckGo Lite, Brave, Google News RSS)
   try {
-    const rawFallback = await searchWeb(query, limit);
+    const rawFallback = await searchWeb(cleanQuery, limit);
     if (rawFallback && !rawFallback.includes("امکان استعلام وب در این لحظه میسر نشد")) {
       return {
         ok: true,
         data: [
           {
-            title: `نتایج جستجو برای: ${query}`,
-            url: "https://duckduckgo.com/?q=" + encodeURIComponent(query),
+            title: `نتایج جستجو برای: ${cleanQuery}`,
+            url: "https://duckduckgo.com/?q=" + encodeURIComponent(cleanQuery),
             snippet: rawFallback.slice(0, 800)
           }
         ]
