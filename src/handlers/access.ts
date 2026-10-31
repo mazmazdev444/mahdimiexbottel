@@ -16,6 +16,7 @@ import { escapeHtml } from "../utils/formatter";
 const NOTIFIED_USERS = new Set<number>();
 
 export async function accessControlMiddleware(ctx: Context, next: NextFunction) {
+  if ((ctx.update as any)?.guest_message) return await next();
   const user = ctx.from;
   if (!user) return await next();
   if (ctx.myChatMember) return await next();
