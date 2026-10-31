@@ -32,6 +32,7 @@ import {
   handleProfanityAlert,
   ADMIN_REPLY_TARGET,
 } from "../services/feedback";
+import { handleQuotaCommand } from "../services/quotaService";
 
 const GREETINGS_FA = [
   "جانم رفیق! مزمز دربست در خدمتته 👂 بگو چی برات ردیف کنم؟",
@@ -246,6 +247,13 @@ export async function handleTextMessage(ctx: Context) {
     ];
     const picked = greetings[Math.floor(Math.random() * greetings.length)];
     await ctx.reply(picked, replyOpts);
+    return;
+  }
+
+  // بررسی درخواست سهمیه روزانه (متن «مزمز سهمیه» یا «سهمیه»)
+  const isQuotaIntent = /^(?:(?:مزمز|mazmaz)[،,:\s]+)?(?:سهمیه|سهمیه\s*من|وضعیت\s*سهمیه|quota)$/i.test((cleanText || text).trim());
+  if (isQuotaIntent) {
+    await handleQuotaCommand(ctx);
     return;
   }
 

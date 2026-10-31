@@ -171,8 +171,8 @@ export async function accessControlMiddleware(ctx: Context, next: NextFunction) 
   const text = ctx.message?.text || "";
   if (text.startsWith("/")) {
     const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@\w+$/, "");
-    // کامند استارت برای عضویت و دریافت خوشامدگویی در پی‌وی مجاز است
-    if (cmd !== "/start") {
+    // کامندهای استارت، سهمیه و راهنما برای همه کاربران مجاز است
+    if (cmd !== "/start" && cmd !== "/quota" && cmd !== "/help") {
       if (!canUserUseCommands(userId)) {
         if (!isGroup) {
           await ctx.reply(
@@ -232,7 +232,7 @@ export async function accessControlMiddleware(ctx: Context, next: NextFunction) 
   // 3. Quota check for approved users in private chats
   if (!isGroup) {
     const text = ctx.message?.text || "";
-    const isFree = text === "/start" || text === "/help" || ctx.callbackQuery?.data === "menu_home";
+    const isFree = text === "/start" || text === "/help" || text.startsWith("/quota") || ctx.callbackQuery?.data === "menu_home";
 
     if (!isFree) {
       const quota = checkAndConsumeQuota(userId);
