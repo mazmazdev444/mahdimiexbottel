@@ -12,6 +12,7 @@ import {
 import { handlePhotoMessage } from "./handlers/photo";
 import { handleTextMessage, runningTasks } from "./handlers/message";
 import { handleStickerMessage, handleAnimationMessage } from "./handlers/sticker";
+import { handleGuestMessage } from "./handlers/guest";
 import { getSequentialKey } from "./utils/sequentialKey";
 import {
   getUserCount,
@@ -143,6 +144,9 @@ bot.use(sequentialize(getSequentialKey));
 
 // 0.5 Register Telegram Group Tracking Middleware (ذخیره تاریخچه پیام‌ها برای هوش مصنوعی)
 setupTrackingMiddleware(bot);
+
+// 0.8 Register Guest Mode Handler (Telegram Bot API 10.0 guest_message -> answerGuestQuery)
+bot.on("guest_message" as any, handleGuestMessage);
 
 // 1. Register Global Access Control & Quota Middleware
 bot.use(accessControlMiddleware);
@@ -2311,6 +2315,7 @@ async function launchBotWithResilience() {
               "callback_query",
               "my_chat_member",
               "chat_member",
+              "guest_message" as any,
             ],
           },
         },

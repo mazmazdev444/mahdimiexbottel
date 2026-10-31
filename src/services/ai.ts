@@ -727,6 +727,14 @@ async function callGenerateContentStreamWithAbort(
   };
 }
 
+export const GUEST_MODE_SYSTEM_INSTRUCTION = `Role: Telegram Guest Mode Agent.
+Context: You were summoned via @mention in an external chat (Guest Mode).
+Operational Rules:
+1. Limited Scope: You only see the trigger message and its immediate reply_to_message. You have no chat history. Never assume context beyond these two messages.
+2. Single Response: Your entire answer is delivered as a single self-contained card via answerGuestQuery. No separate file uploads or multi-message splits.
+3. Media Delivery: Use inline links only: ![caption](url), [🎵 Title](url), [🎥 Title](url).
+4. Missing Context: If the user asks to analyze or translate an earlier message not in the immediate reply chain, instruct them to reply directly to that message and @mention the bot again.`;
+
 async function askGeminiInternal(
   userId: number,
   prompt: string,
@@ -738,8 +746,9 @@ async function askGeminiInternal(
   if (signal?.aborted) {
     return STOPPED_RESULT;
   }
-  const isAdmin = CONFIG.ADMIN_IDS.includes(userId);
-  const isGroup = Boolean(ctx?.chat?.type === "group" || ctx?.chat?.type === "supergroup" || (ctx?.chat?.id && ctx.chat.id < 0));
+  const isGuest = Boolean(ctx?.isGuest);
+  const isAdmin = !isGuest && CONFIG.ADMIN_IDS.includes(userId);
+  const isGroup = !isGuest && Boolean(ctx?.chat?.type === "group" || ctx?.chat?.type === "supergroup" || (ctx?.chat?.id && ctx.chat.id < 0));
   const historyTargetId = (isGroup && ctx?.chat?.id) ? ctx.chat.id : userId;
 
   // ۱. فیلتر فحش و پاسخ‌های رفاقتی
@@ -768,11 +777,13 @@ async function askGeminiInternal(
     const fallback = isAdmin
       ? "سلام رئیس مهدی عزیز! برای فعال‌سازی کامل مغز جمینای، کلید رو با /setkey برام بفرست تا بترکونیم! 🚀⚡"
       : "نوکرتم رفیق! در حال حاضر مغز جمینای در حال استراحته، از بقیه بخش‌های منو می‌تونی استفاده کنی!";
-    const userTurn = isGroup
-      ? formatGroupHistoryTurn(ctx?.from || "کاربر", ctx?.from?.username, ctx?.from?.id || userId, prompt)
-      : prompt;
-    saveChatMessage(historyTargetId, "user", userTurn);
-    saveChatMessage(historyTargetId, "model", fallback);
+    if (!isGuest) {
+      const userTurn = isGroup
+        ? formatGroupHistoryTurn(ctx?.from || "کاربر", ctx?.from?.username, ctx?.from?.id || userId, prompt)
+        : prompt;
+      saveChatMessage(historyTargetId, "user", userTurn);
+      saveChatMessage(historyTargetId, "model", fallback);
+    }
     return fallback;
   }
 
@@ -789,7 +800,7 @@ async function askGeminiInternal(
   }
 
   try {
-    const rawHistory = getChatHistory(historyTargetId, 12);
+    const rawHistory = isGuest ? [] : getChatHistory(historyTargetId, 12);
     const rawContents: Array<any> = [];
 
     for (const msg of rawHistory) {
@@ -929,18 +940,24 @@ async function askGeminiInternal(
         approvedRules.map((r, i) => `${i + 1}. [${r.key}]: ${r.value}`).join("\n")
       : "";
 
-    const baseInstruction = isAdmin ? adminSystemInstruction : userSystemInstruction;
-    let systemInstruction = customInstruction
+    const baseInstruction = isGuest
+      ? GUEST_MODE_SYSTEM_INSTRUCTION
+      : (isAdmin ? adminSystemInstruction : userSystemInstruction);
+
+    let systemInstruction = (customInstruction && !isGuest)
       ? `${baseInstruction}\n\n### دستورالعمل تکمیلی و رفتاری ادمین:\n${customInstruction}`
       : baseInstruction;
 
-    if (dynamicRulesText) {
+    if (dynamicRulesText && !isGuest) {
       systemInstruction += dynamicRulesText;
     }
 
     const currentDate = new Date().toISOString().slice(0, 10);
     const strictSearchDirective = "قوانین استخراج زنده اطلاعات فنی (Real-time Technical Intelligence): پاسخ به سوالات درباره آخرین اخبار، نسخه‌های جدید نرم‌افزار، مدل‌های هوش مصنوعی، کتابخانه‌ها و قیمت‌ها از حافظه داخلی اکیداً ممنوع است. قبل از پاسخ، اجرای ابزار web_search الزامی است (No Pre-Search Denial). هرگز شماره نسخه‌های درخواستی را دانگرید یا عوض نکن (Exact Version Fidelity) و در صورت نبود نتیجه معتبر، صراحتاً بگو نتیجه‌ای یافت نشد و هرگز اطلاعات جعلی نساز (Zero Results Policy).";
-    systemInstruction = `${strictSearchDirective}\n\n[Current Date: ${currentDate}]\n\n${systemInstruction}\n\n${GROUP_SPEAKER_INVARIANTS_PROMPT}`;
+
+    systemInstruction = isGuest
+      ? `${GUEST_MODE_SYSTEM_INSTRUCTION}\n\n${strictSearchDirective}\n\n[Current Date: ${currentDate}]`
+      : `${strictSearchDirective}\n\n[Current Date: ${currentDate}]\n\n${systemInstruction}\n\n${GROUP_SPEAKER_INVARIANTS_PROMPT}`;
 
     const functionDeclarations: any[] = [
       {
@@ -1159,10 +1176,14 @@ async function askGeminiInternal(
       );
     }
 
+    const effectiveFunctionDeclarations = isGuest
+      ? functionDeclarations.filter((d) => ["web_search", "eval_math", "get_weather", "read_web_link"].includes(d.name))
+      : functionDeclarations;
+
     const enableGoogleSearch = CONFIG.ENABLE_GOOGLE_SEARCH_GROUNDING || getSetting("enable_google_search_grounding") === "true";
     let tools: any[] = enableGoogleSearch
-      ? [{ functionDeclarations }, { googleSearch: {} }]
-      : [{ functionDeclarations }];
+      ? [{ functionDeclarations: effectiveFunctionDeclarations }, { googleSearch: {} }]
+      : [{ functionDeclarations: effectiveFunctionDeclarations }];
     const isForcedSearch = isSearchIntentQuery(prompt);
 
     let response: any = null;
@@ -1888,8 +1909,10 @@ async function askGeminiInternal(
       }
       historyTurn = formatGroupHistoryTurn(ctx?.from || "کاربر", ctx?.from?.username, ctx?.from?.id || userId, textOnly || prompt);
     }
-    saveChatMessage(historyTargetId, "user", historyTurn);
-    saveChatMessage(historyTargetId, "model", reply);
+    if (!isGuest) {
+      saveChatMessage(historyTargetId, "user", historyTurn);
+      saveChatMessage(historyTargetId, "model", reply);
+    }
 
     return reply;
   } catch (error: any) {
@@ -1910,6 +1933,17 @@ export async function askGemini(
   signal?: AbortSignal
 ): Promise<string> {
   return askGeminiInternal(userId, prompt, imageBase64, ctx, signal, undefined);
+}
+
+export async function askGeminiGuest(
+  callerId: number,
+  prompt: string,
+  replyText?: string | null
+): Promise<string> {
+  const promptWithReply = replyText
+    ? `[Replied to: "${replyText}"]\nUser query: ${prompt}`
+    : prompt;
+  return askGemini(callerId, promptWithReply, undefined, { isGuest: true, from: { id: callerId } });
 }
 
 export async function askGeminiStream(
