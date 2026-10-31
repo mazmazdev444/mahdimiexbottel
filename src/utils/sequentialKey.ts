@@ -1,6 +1,8 @@
 export function getSequentialKey(ctx: any): string | undefined {
   if (ctx.callbackQuery) return undefined;
   if ((ctx.update as any)?.guest_message) return undefined;
+  if (ctx.inlineQuery) return undefined;
+  if ((ctx.update as any)?.business_message) return undefined;
   const text = ctx.message?.text || ctx.msg?.text;
   if (text && /^\/stop(?:@\w+)?(?:\s|$)/i.test(text.trim())) {
     return undefined;
