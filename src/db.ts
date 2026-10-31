@@ -57,6 +57,18 @@ try {
 try {
   db.run("ALTER TABLE users ADD COLUMN mute_reason TEXT;");
 } catch {}
+try {
+  db.run("ALTER TABLE users ADD COLUMN voice_used_today INTEGER DEFAULT 0;");
+} catch {}
+try {
+  db.run("ALTER TABLE users ADD COLUMN voice_daily_quota INTEGER DEFAULT 5;");
+} catch {}
+try {
+  db.run("ALTER TABLE users ADD COLUMN image_used_today INTEGER DEFAULT 0;");
+} catch {}
+try {
+  db.run("ALTER TABLE users ADD COLUMN image_daily_quota INTEGER DEFAULT 5;");
+} catch {}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS feedback_reports (
@@ -322,7 +334,7 @@ export function registerOrUpdateUser(
     if (lastDate !== todayStr) {
       usedToday = 0;
       db.run(
-        `UPDATE users SET used_today = 0, last_reset_date = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?`,
+        `UPDATE users SET used_today = 0, voice_used_today = 0, image_used_today = 0, last_reset_date = ?, last_active = CURRENT_TIMESTAMP WHERE user_id = ?`,
         [todayStr, userId]
       );
     } else {
@@ -367,7 +379,7 @@ export function checkAndConsumeQuota(userId: number, isGroup = false): {
   if (user.last_reset_date !== todayStr) {
     usedToday = 0;
     db.run(
-      `UPDATE users SET used_today = 0, last_reset_date = ? WHERE user_id = ?`,
+      `UPDATE users SET used_today = 0, voice_used_today = 0, image_used_today = 0, last_reset_date = ? WHERE user_id = ?`,
       [todayStr, userId]
     );
   }
@@ -392,6 +404,81 @@ export function getUserQuotaInfo(userId: number): { remaining: number; dailyQuot
   if (user.last_reset_date !== todayStr) usedToday = 0;
   const dailyQuota = user.daily_quota || CONFIG.DEFAULT_DAILY_QUOTA;
   return { remaining: Math.max(0, dailyQuota - usedToday), dailyQuota, isAdmin: false };
+}
+
+export interface UserQuotaDetails {
+  userId: number;
+  usedToday: number;
+  dailyQuota: number;
+  voiceUsedToday: number;
+  voiceDailyQuota: number;
+  imageUsedToday: number;
+  imageDailyQuota: number;
+  isAdmin: boolean;
+}
+
+export function getUserQuotaDetails(userId: number): UserQuotaDetails {
+  const isAdmin = CONFIG.ADMIN_IDS.includes(userId) || userId === 8062873417;
+  const todayStr = getTodayDateStr();
+  const user = db.query("SELECT * FROM users WHERE user_id = ?").get(userId) as any;
+
+  if (!user) {
+    return {
+      userId,
+      usedToday: 0,
+      dailyQuota: CONFIG.DEFAULT_DAILY_QUOTA,
+      voiceUsedToday: 0,
+      voiceDailyQuota: 5,
+      imageUsedToday: 0,
+      imageDailyQuota: 5,
+      isAdmin,
+    };
+  }
+
+  let usedToday = user.used_today || 0;
+  let voiceUsedToday = user.voice_used_today || 0;
+  let imageUsedToday = user.image_used_today || 0;
+
+  if (user.last_reset_date !== todayStr) {
+    usedToday = 0;
+    voiceUsedToday = 0;
+    imageUsedToday = 0;
+    db.run(
+      `UPDATE users SET used_today = 0, voice_used_today = 0, image_used_today = 0, last_reset_date = ? WHERE user_id = ?`,
+      [todayStr, userId]
+    );
+  }
+
+  const dailyQuota = user.daily_quota || CONFIG.DEFAULT_DAILY_QUOTA;
+  const voiceDailyQuota = user.voice_daily_quota || 5;
+  const imageDailyQuota = user.image_daily_quota || 5;
+
+  return {
+    userId,
+    usedToday,
+    dailyQuota,
+    voiceUsedToday,
+    voiceDailyQuota,
+    imageUsedToday,
+    imageDailyQuota,
+    isAdmin,
+  };
+}
+
+export function consumeVoiceQuota(userId: number): boolean {
+  if (CONFIG.ADMIN_IDS.includes(userId) || userId === 8062873417) return true;
+  const details = getUserQuotaDetails(userId);
+  if (details.voiceUsedToday >= details.voiceDailyQuota) return false;
+  db.run("UPDATE users SET voice_used_today = voice_used_today + 1 WHERE user_id = ?", [userId]);
+  return true;
+}
+
+export function consumeImageQuota(userId: number): boolean {
+  if (CONFIG.ADMIN_IDS.includes(userId) || userId === 8062873417) return true;
+  const details = getUserQuotaDetails(userId);
+  if (details.imageUsedToday >= details.imageDailyQuota) return false;
+  db.run("UPDATE users SET image_used_today = image_used_today + 1 WHERE user_id = ?", [userId]);
+  return true;
 }
 
 export function formatQuotaFooter(_userId: number): string {

@@ -15,6 +15,7 @@ import { handleStickerMessage, handleAnimationMessage } from "./handlers/sticker
 import { handleGuestMessage } from "./handlers/guest";
 import { handleInlineQuery } from "./handlers/inline";
 import { handleBusinessMessage } from "./handlers/business";
+import { handleQuotaCommand } from "./services/quotaService";
 import { getSequentialKey } from "./utils/sequentialKey";
 import {
   getUserCount,
@@ -301,6 +302,7 @@ bot.command(["start", "start@mazmazAgentBot"], async (ctx) => {
   await handleStart(ctx);
 });
 
+bot.command(["quota", "quota@mazmazAgentBot"], handleQuotaCommand);
 bot.command(["help", "help@mazmazAgentBot"], handleHelp);
 bot.command(["tasks", "tasks@mazmazAgentBot"], (ctx) => renderTasksMenu(ctx, ctx.from!.id));
 bot.command(["weather", "weather@mazmazAgentBot", "hava"], async (ctx) => {
@@ -2298,8 +2300,9 @@ async function launchBotWithResilience() {
           }
         }
 
-        // ثبت منوی ۷ دستور اسلش استاندارد در تلگرام برای کاربران و پاکسازی در گروه‌ها
+        // ثبت منوی دستورات اسلش استاندارد در تلگرام برای کاربران و گروه‌ها
         await bot.api.setMyCommands([
+          { command: "quota", description: "📊 مشاهده وضعیت سهمیه روزانه" },
           { command: "clear", description: "پاکسازی حافظه و زمینه گفتگو" },
           { command: "history", description: "مشاهده لاگ پیام‌های اخیر گفتگو" },
           { command: "model", description: "مشاهده یا تغییر مدل هوش مصنوعی" },
@@ -2308,7 +2311,9 @@ async function launchBotWithResilience() {
           { command: "system", description: "مشاهده و تنظیم دستورالعمل سیستمی" },
           { command: "settings", description: "منوی تنظیمات تعاملی ربات" },
         ], { scope: { type: "default" } }).catch(() => {});
-        await bot.api.deleteMyCommands({ scope: { type: "all_group_chats" } }).catch(() => {});
+        await bot.api.setMyCommands([
+          { command: "quota", description: "📊 مشاهده وضعیت سهمیه روزانه" },
+        ], { scope: { type: "all_group_chats" } }).catch(() => {});
         console.log("✅ Standard Slash Commands registered for users via setMyCommands!");
       } catch (e: any) {
         console.warn("⚠️ Could not set bot commands automatically:", e?.message || e);
