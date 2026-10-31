@@ -142,6 +142,15 @@ export const bot = new Bot(CONFIG.BOT_TOKEN, {
   },
 });
 
+// Entry middleware: raw update logging for debug pipeline & immediate guest_message routing
+bot.use(async (ctx, next) => {
+  console.log("[UPDATE RECV]", ctx.update?.update_id, Object.keys(ctx.update || {}));
+  if ((ctx.update as any)?.guest_message || (ctx as any).guestMessage) {
+    return handleGuestMessage(ctx);
+  }
+  await next();
+});
+
 // 0. Sequentialize updates per chat, bypassing /stop command and inline callback queries
 bot.use(sequentialize(getSequentialKey));
 
@@ -2331,10 +2340,11 @@ async function launchBotWithResilience() {
         console.warn("⚠️ Could not set bot commands automatically:", e?.message || e);
       }
 
+      // Fallback: omit allowed_updates completely so grammY receives all default and extended update types natively from Telegram
       activeRunner = run(bot, {
         runner: {
           fetch: {
-            allowed_updates: ALLOWED_UPDATES,
+            ...(process.env.STRICT_ALLOWED_UPDATES === "true" ? { allowed_updates: ALLOWED_UPDATES } : {}),
           },
         },
       });
