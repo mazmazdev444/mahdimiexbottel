@@ -17,6 +17,7 @@ import {
   isModelInCooldown,
   modelCooldowns,
   getModelCandidateChain,
+  pruneMultimodalHistory,
 } from "../src/services/ai";
 import { setSetting, getSetting } from "../src/db";
 
@@ -219,26 +220,187 @@ describe("resilience service", () => {
     });
   });
 
-  describe("Model Cooldowns (5-minute cooldown on 429/503)", () => {
-    it("should default to 300,000ms (5 minutes) for model cooldown", () => {
-      const model = "test-model-cooldown";
-      markModelCooldown(model);
+  describe("Dynamic Model Cooldowns (25s on 503 vs 300s on 429)", () => {
+    it("should set 25s cooldown for HTTP 503 transient spikes", () => {
+      const model = "gemini-test-503-spike";
+      markModelCooldown(model, 503);
       const entry = modelCooldowns.get(model);
       expect(entry).toBeDefined();
-      expect(entry!.expiresAt - Date.now()).toBeGreaterThan(290000);
+      const diff = entry!.expiresAt - Date.now();
+      expect(diff).toBeLessThanOrEqual(25000);
+      expect(diff).toBeGreaterThan(24000);
       expect(isModelInCooldown(model)).toBe(true);
       modelCooldowns.delete(model);
     });
 
-    it("getModelCandidateChain should skip models that are currently in cooldown", () => {
-      const chainBefore = getModelCandidateChain();
-      if (chainBefore.length > 1) {
-        const firstCandidate = chainBefore[0];
-        markModelCooldown(firstCandidate, 300000);
-        const chainAfter = getModelCandidateChain();
-        expect(chainAfter).not.toContain(firstCandidate);
-        modelCooldowns.delete(firstCandidate);
-      }
+    it("should support explicit 25,000ms (25s) duration for 503", () => {
+      const model = "gemini-test-25s-explicit";
+      markModelCooldown(model, 25000);
+      const entry = modelCooldowns.get(model);
+      expect(entry).toBeDefined();
+      const diff = entry!.expiresAt - Date.now();
+      expect(diff).toBeLessThanOrEqual(25000);
+      expect(diff).toBeGreaterThan(24000);
+      modelCooldowns.delete(model);
+    });
+
+    it("should retain strict 300s (5-minute) cooldown for HTTP 429 quota exhaustion", () => {
+      const model = "gemini-test-429-quota";
+      markModelCooldown(model, 429);
+      const entry = modelCooldowns.get(model);
+      expect(entry).toBeDefined();
+      const diff = entry!.expiresAt - Date.now();
+      expect(diff).toBeLessThanOrEqual(300000);
+      expect(diff).toBeGreaterThan(295000);
+      expect(isModelInCooldown(model)).toBe(true);
+      modelCooldowns.delete(model);
+    });
+
+    it("should default to 300,000ms when no status or duration is specified", () => {
+      const model = "test-model-default-cooldown";
+      markModelCooldown(model);
+      const entry = modelCooldowns.get(model);
+      expect(entry).toBeDefined();
+      expect(entry!.expiresAt - Date.now()).toBeGreaterThan(295000);
+      modelCooldowns.delete(model);
+    });
+  });
+
+  describe("Primary Candidate Recovery & Tier Ordering", () => {
+    it("should prioritize gemini-3.8-flash as primary model by default", () => {
+      // Ensure clean state without stored override
+      setSetting("ai_model", "");
+      modelCooldowns.clear();
+
+      const chain = getModelCandidateChain();
+      expect(chain.length).toBeGreaterThan(0);
+      expect(chain[0]).toBe("gemini-3.8-flash");
+    });
+
+    it("should temporarily fallback when primary model is in cooldown, then recover immediately when cooldown expires", () => {
+      setSetting("ai_model", "");
+      modelCooldowns.clear();
+
+      const primary = "gemini-3.8-flash";
+      const initialChain = getModelCandidateChain();
+      expect(initialChain[0]).toBe(primary);
+
+      // Simulate transient 503 spike (25s cooldown)
+      markModelCooldown(primary, 25000);
+      const degradedChain = getModelCandidateChain();
+      expect(degradedChain).not.toContain(primary);
+      expect(degradedChain[0]).toBe("gemini-3.7-flash");
+
+      // Cooldown expires (simulate expiration)
+      modelCooldowns.delete(primary);
+      const recoveredChain = getModelCandidateChain();
+      expect(recoveredChain[0]).toBe(primary);
+    });
+
+    it("should respect stored /model override as primary candidate", () => {
+      modelCooldowns.clear();
+      setSetting("ai_model", "gemini-3.7-flash");
+
+      const chain = getModelCandidateChain();
+      expect(chain[0]).toBe("gemini-3.7-flash");
+
+      // Cleanup
+      setSetting("ai_model", "");
+    });
+  });
+
+  describe("Multimodal History Pruning (pruneMultimodalHistory)", () => {
+    it("should strip inlineData parts from historical turns while preserving it strictly on immediate current turn", () => {
+      const rawPayload = [
+        {
+          role: "user",
+          parts: [
+            { text: "این تصویر اول چیه؟" },
+            { inlineData: { mimeType: "image/jpeg", data: "historical_base64_aaa..." } },
+          ],
+        },
+        {
+          role: "model",
+          parts: [{ text: "یک عکس از گربه است." }],
+        },
+        {
+          role: "user",
+          parts: [
+            { text: "این تصویر جدید چیه؟" },
+            { inlineData: { mimeType: "image/jpeg", data: "current_turn_base64_bbb..." } },
+          ],
+        },
+      ];
+
+      const pruned = pruneMultimodalHistory(rawPayload);
+      expect(pruned.length).toBe(3);
+
+      // Historical turn 0: inlineData must be stripped
+      const turn0Parts = pruned[0].parts;
+      expect(turn0Parts.some((p: any) => p.inlineData)).toBe(false);
+      expect(turn0Parts.length).toBe(1);
+      expect(turn0Parts[0].text).toBe("این تصویر اول چیه؟");
+
+      // Historical turn 1: model text intact
+      expect(pruned[1].parts[0].text).toBe("یک عکس از گربه است.");
+
+      // Immediate current turn 2: inlineData must be strictly preserved
+      const turn2Parts = pruned[2].parts;
+      expect(turn2Parts.some((p: any) => p.inlineData)).toBe(true);
+      expect(turn2Parts[1].inlineData.data).toBe("current_turn_base64_bbb...");
+    });
+
+    it("should strip data URIs from text in historical turns", () => {
+      const payload = [
+        {
+          role: "user",
+          parts: [{ text: "عکس: data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA... توضیحات" }],
+        },
+        {
+          role: "user",
+          parts: [{ text: "سوال نهایی" }],
+        },
+      ];
+
+      const pruned = pruneMultimodalHistory(payload);
+      expect(pruned[0].parts[0].text).toContain("[تصویر]");
+      expect(pruned[0].parts[0].text).not.toContain("iVBORw0KGgoAAA");
+      expect(pruned[1].parts[0].text).toBe("سوال نهایی");
+    });
+
+    it("should provide fallback text placeholder if a historical turn only contained image", () => {
+      const payload = [
+        {
+          role: "user",
+          parts: [{ inlineData: { mimeType: "image/jpeg", data: "only_image_data" } }],
+        },
+        {
+          role: "user",
+          parts: [{ text: "پیام جاری" }],
+        },
+      ];
+
+      const pruned = pruneMultimodalHistory(payload);
+      expect(pruned[0].parts.length).toBe(1);
+      expect(pruned[0].parts[0].text).toBe("[تصویر]");
+      expect(pruned[0].parts[0].inlineData).toBeUndefined();
+    });
+
+    it("should safely handle empty or single-turn payloads without errors", () => {
+      expect(pruneMultimodalHistory([])).toEqual([]);
+
+      const singleTurn = [
+        {
+          role: "user",
+          parts: [
+            { text: "تنها یک پیام" },
+            { inlineData: { mimeType: "image/jpeg", data: "immediate_base64" } },
+          ],
+        },
+      ];
+      const res = pruneMultimodalHistory(singleTurn);
+      expect(res.length).toBe(1);
+      expect(res[0].parts.some((p: any) => p.inlineData)).toBe(true);
     });
   });
 });

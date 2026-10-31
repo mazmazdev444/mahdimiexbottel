@@ -101,26 +101,37 @@ export function getResolvedActiveModel(): ModelResolution {
     return { model: stored, source: "stored override" };
   }
 
-  // 2. GEMINI_MODELS env var (first allowed, non-dead candidate)
+  // 2. Primary default model (gemini-3.8-flash if allowed and not dead)
+  if (CONFIG.ALLOWED_MODELS.includes("gemini-3.8-flash") && !isDeadModel("gemini-3.8-flash")) {
+    return { model: "gemini-3.8-flash", source: "GEMINI_MODELS" };
+  }
+
+  // 3. GEMINI_MODELS env var (first allowed, non-dead candidate)
   for (const m of CONFIG.GEMINI_MODELS) {
     if (CONFIG.ALLOWED_MODELS.includes(m) && !isDeadModel(m)) {
       return { model: m, source: "GEMINI_MODELS" };
     }
   }
 
-  // 3. Existing AI_MODEL (if allowed and non-dead)
+  // 4. Existing AI_MODEL (if allowed and non-dead)
   if (CONFIG.AI_MODEL && CONFIG.ALLOWED_MODELS.includes(CONFIG.AI_MODEL) && !isDeadModel(CONFIG.AI_MODEL)) {
     return { model: CONFIG.AI_MODEL, source: "AI_MODEL" };
   }
 
-  // 4. Safe default in code
+  // 5. Safe default in code
   const safeDefault = CONFIG.ALLOWED_MODELS.find((m) => !isDeadModel(m)) || "gemini-3.5-flash-lite";
   return { model: safeDefault, source: "default" };
 }
 
 export const modelCooldowns = new Map<string, { expiresAt: number; logged: boolean }>();
 
-export function markModelCooldown(modelName: string, durationMs = 300000): void {
+export function markModelCooldown(modelName: string, durationMsOrStatus: number = 300000): void {
+  const durationMs =
+    durationMsOrStatus === 503
+      ? 25000
+      : durationMsOrStatus === 429
+      ? 300000
+      : durationMsOrStatus;
   modelCooldowns.set(modelName, {
     expiresAt: Date.now() + durationMs,
     logged: false,
@@ -138,25 +149,57 @@ export function isModelInCooldown(modelName: string): boolean {
 }
 
 export function getModelCandidateChain(): string[] {
-  const active = getResolvedActiveModel().model;
+  const activeOverride = getSetting("ai_model");
+  const hasValidOverride =
+    activeOverride &&
+    CONFIG.ALLOWED_MODELS.includes(activeOverride) &&
+    !isDeadModel(activeOverride);
+
+  // Re-evaluate from primary model (gemini-3.8-flash or active override) downward
+  const primaryModel = hasValidOverride
+    ? activeOverride
+    : (CONFIG.ALLOWED_MODELS.includes("gemini-3.8-flash") && !isDeadModel("gemini-3.8-flash")
+        ? "gemini-3.8-flash"
+        : getResolvedActiveModel().model);
+
+  const TIER_RANK: Record<string, number> = {
+    "gemini-3.8-flash": 100,
+    "gemini-3.7-flash": 90,
+    "gemini-3.6-flash": 80,
+    "gemini-3.5-flash": 70,
+    "gemini-flash-lite-latest": 60,
+    "gemini-3.5-flash-lite": 50,
+    "gemini-3.1-flash-lite": 40,
+  };
+
   const rawList = [
-    active,
+    primaryModel,
     ...CONFIG.GEMINI_MODELS,
     CONFIG.AI_MODEL,
+    ...CONFIG.ALLOWED_MODELS,
   ];
-  const allCandidates = [...new Set(rawList.filter(Boolean))].filter(
+
+  const candidatePool = [...new Set(rawList.filter(Boolean))].filter(
     (m) => !isDeadModel(m) && CONFIG.ALLOWED_MODELS.includes(m)
   );
 
-  if (allCandidates.length <= 1) {
-    return allCandidates;
+  candidatePool.sort((a, b) => {
+    if (a === primaryModel) return -1;
+    if (b === primaryModel) return 1;
+    const rankA = TIER_RANK[a] ?? 0;
+    const rankB = TIER_RANK[b] ?? 0;
+    return rankB - rankA;
+  });
+
+  if (candidatePool.length <= 1) {
+    return candidatePool;
   }
 
   const now = Date.now();
   const available: string[] = [];
   const cooling: Array<{ model: string; expiresAt: number; cd: { expiresAt: number; logged: boolean } }> = [];
 
-  for (const m of allCandidates) {
+  for (const m of candidatePool) {
     const cd = modelCooldowns.get(m);
     if (cd && now < cd.expiresAt) {
       cooling.push({ model: m, expiresAt: cd.expiresAt, cd });
@@ -276,6 +319,39 @@ export async function testGeminiKey(apiKey: string): Promise<{ ok: boolean; mess
   return { ok: false, message: `خطا در برقراری ارتباط با گوگل: ${cleanLastErr}` };
 }
 
+/**
+ * Prunes multimodal inputs from chat history turns before constructing payloads.
+ * Strips base64 image data from historical turns while keeping inline image parts
+ * strictly for the immediate current turn to prevent token inflation.
+ */
+export function pruneMultimodalHistory(contents: any[]): any[] {
+  if (!Array.isArray(contents) || contents.length === 0) return [];
+  const pruned = JSON.parse(JSON.stringify(contents));
+  const totalTurns = pruned.length;
+
+  for (let i = 0; i < totalTurns - 1; i++) {
+    const turn = pruned[i];
+    if (!turn || !Array.isArray(turn.parts)) continue;
+
+    // Remove any inlineData parts (e.g. image payloads) from historical turns
+    turn.parts = turn.parts.filter((p: any) => !p?.inlineData);
+
+    // Strip base64 data URIs from text parts in historical turns
+    for (const part of turn.parts) {
+      if (typeof part?.text === "string") {
+        part.text = part.text.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=\s]+/gi, "[تصویر]");
+      }
+    }
+
+    // Ensure historical turn does not end up with empty parts array
+    if (turn.parts.length === 0) {
+      turn.parts = [{ text: "[تصویر]" }];
+    }
+  }
+
+  return pruned;
+}
+
 // جلوگیری از خطای ۴۰۰ جمینای به خاطر پیام‌های تکراری پشت سر هم
 function sanitizeContents(rawContents: any[]): any[] {
   const sanitized: any[] = [];
@@ -367,7 +443,7 @@ async function callGenerateContentWithAbort(
   aiClient: any,
   params: any,
   sig?: AbortSignal,
-  timeoutMs = 10000
+  timeoutMs = 30000
 ): Promise<any> {
   if (sig?.aborted) {
     const err: any = new Error("Request aborted");
@@ -428,7 +504,7 @@ async function callGenerateContentStreamWithAbort(
   aiClient: any,
   params: any,
   sig?: AbortSignal,
-  timeoutMs = 15000,
+  timeoutMs = 30000,
   onChunk?: (chunk: string, accumulated: string) => void
 ): Promise<{ response: any; receivedAnyChunk: boolean; accumulatedText: string }> {
   if (sig?.aborted) {
@@ -470,16 +546,17 @@ async function callGenerateContentStreamWithAbort(
     };
   }
 
-  let stream: any;
+  // TTFT (Time-to-First-Token) 30s timeout timer
   let timeoutTimer: any;
-  const timeoutPromise = new Promise((_, reject) => {
+  const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutTimer = setTimeout(() => {
-      const err: any = new Error(`Stream request timed out after ${timeoutMs}ms`);
+      const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
       err.name = "TimeoutError";
       reject(err);
     }, timeoutMs);
   });
 
+  let stream: any;
   try {
     stream = await Promise.race([streamPromise, timeoutPromise]);
   } catch (initErr: any) {
@@ -494,15 +571,28 @@ async function callGenerateContentStreamWithAbort(
       receivedAnyChunk: false,
       accumulatedText: "",
     };
-  } finally {
+  }
+
+  const iterator = typeof stream?.[Symbol.asyncIterator] === "function"
+    ? stream[Symbol.asyncIterator]()
+    : null;
+
+  if (!iterator) {
     clearTimeout(timeoutTimer);
+    return {
+      response: null,
+      receivedAnyChunk: false,
+      accumulatedText: "",
+    };
   }
 
   let abortHandler: (() => void) | undefined;
   if (sig) {
     abortHandler = () => {
       try {
-        if (typeof stream?.return === "function") {
+        if (typeof iterator?.return === "function") {
+          iterator.return();
+        } else if (typeof stream?.return === "function") {
           stream.return();
         }
       } catch {}
@@ -515,13 +605,16 @@ async function callGenerateContentStreamWithAbort(
   }
 
   try {
-    for await (const chunk of stream) {
-      if (sig?.aborted) {
-        const err: any = new Error("Request aborted");
-        err.name = "AbortError";
-        throw err;
-      }
+    // 1. Apply 30s timeout strictly as Time-to-First-Token (TTFT)
+    let firstItem: IteratorResult<any>;
+    try {
+      firstItem = await Promise.race([iterator.next(), timeoutPromise]);
+    } finally {
+      // Clear TTFT timeout as soon as the first chunk arrives or stream ends
+      clearTimeout(timeoutTimer);
+    }
 
+    const processChunk = (chunk: any) => {
       if (chunk?.usageMetadata) {
         lastUsageMetadata = chunk.usageMetadata;
       }
@@ -562,8 +655,28 @@ async function callGenerateContentStreamWithAbort(
           }
         }
       }
+    };
+
+    if (!firstItem.done) {
+      processChunk(firstItem.value);
+
+      // 2. Consume subsequent chunks while actively arriving without TTFT timeout aborting
+      while (true) {
+        if (sig?.aborted) {
+          const err: any = new Error("Request aborted");
+          err.name = "AbortError";
+          throw err;
+        }
+
+        const nextItem = await iterator.next();
+        if (nextItem.done) {
+          break;
+        }
+        processChunk(nextItem.value);
+      }
     }
   } catch (iterErr: any) {
+    clearTimeout(timeoutTimer);
     if (sig?.aborted || iterErr?.name === "AbortError") {
       const err: any = new Error("Request aborted");
       err.name = "AbortError";
@@ -575,6 +688,7 @@ async function callGenerateContentStreamWithAbort(
       accumulatedText,
     };
   } finally {
+    clearTimeout(timeoutTimer);
     if (sig && abortHandler) {
       sig.removeEventListener("abort", abortHandler);
     }
@@ -675,7 +789,7 @@ async function askGeminiInternal(
   }
 
   try {
-    const rawHistory = getChatHistory(historyTargetId, 6);
+    const rawHistory = getChatHistory(historyTargetId, 12);
     const rawContents: Array<any> = [];
 
     for (const msg of rawHistory) {
@@ -707,7 +821,8 @@ async function askGeminiInternal(
       parts: currentParts,
     });
 
-    const contents = sanitizeContents(rawContents);
+    const prunedContents = pruneMultimodalHistory(rawContents);
+    const contents = sanitizeContents(prunedContents);
 
     const modelCandidates = getModelCandidateChain();
 
@@ -1128,7 +1243,7 @@ async function askGeminiInternal(
               currentAi,
               call1Params,
               signal,
-              15000,
+              30000,
               onChunk
             );
             if (streamRes.response) {
@@ -1204,13 +1319,13 @@ async function askGeminiInternal(
             }
           }
 
-          // 2. Per-request timeout (10s): mark model in 5-minute cooldown and switch candidate
+          // 2. Per-request timeout (30s): mark model in cooldown and switch candidate
           const isTimeout =
             err?.name === "TimeoutError" ||
             status === 504 ||
             String(err?.message || "").includes("timed out");
           if (isTimeout) {
-            console.warn(`[GEMINI TIMEOUT] Model ${m} call 1 timed out after 10s. Entering 5-minute cooldown and switching candidate...`);
+            console.warn(`[GEMINI TIMEOUT] Model ${m} call 1 timed out after 30s. Entering cooldown and switching candidate...`);
             markModelCooldown(m, 300000);
             break;
           }
@@ -1272,18 +1387,20 @@ async function askGeminiInternal(
             }
           }
 
-          // Server errors (503, 500): max 1 retry with ~800ms delay, then 5-minute cooldown
+          // Server errors (503, 500): max 1 retry with jittered backoff (800ms-1500ms), then dynamic cooldown (25s for 503)
           if (status === 503 || status === 500) {
             if (call1Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
-              const totalDelay = 800 + Math.floor(Math.random() * 200);
+              const totalDelay = Math.floor(800 + Math.random() * 700);
               console.warn(`[GEMINI RETRY] Model ${m} call 1 failed with status ${status} (attempt ${call1Attempt}/2). Retrying in ${totalDelay}ms...`);
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 1 failed after 1 retry (${status}). Entering 5-minute cooldown and switching candidate...`);
-              markModelCooldown(m, 300000);
+              const cooldownMs = status === 503 ? 25000 : 300000;
+              const cooldownSec = Math.round(cooldownMs / 1000);
+              console.warn(`[GEMINI FALLBACK] Model ${m} call 1 failed after 1 retry (${status}). Entering ${cooldownSec}s cooldown and switching candidate...`);
+              markModelCooldown(m, cooldownMs);
               break;
             }
           }
@@ -1498,7 +1615,7 @@ async function askGeminiInternal(
               currentAi,
               call2Params,
               signal,
-              15000,
+              30000,
               onChunk
             );
             if (streamRes.response) {
@@ -1574,13 +1691,13 @@ async function askGeminiInternal(
             }
           }
 
-          // 2. Per-request timeout (10s)
+          // 2. Per-request timeout (30s)
           const isTimeout =
             err?.name === "TimeoutError" ||
             status === 504 ||
             String(err?.message || "").includes("timed out");
           if (isTimeout) {
-            console.warn(`[GEMINI TIMEOUT] Model ${m} call 2 timed out after 10s. Entering 5-minute cooldown and switching candidate...`);
+            console.warn(`[GEMINI TIMEOUT] Model ${m} call 2 timed out after 30s. Entering cooldown and switching candidate...`);
             markModelCooldown(m, 300000);
             break;
           }
@@ -1646,18 +1763,20 @@ async function askGeminiInternal(
             }
           }
 
-          // Server errors (503, 500): max 1 retry with ~800ms delay, then 5-minute cooldown
+          // Server errors (503, 500): max 1 retry with jittered backoff (800ms-1500ms), then dynamic cooldown (25s for 503)
           if (status === 503 || status === 500) {
             if (call2Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
-              const totalDelay = 800 + Math.floor(Math.random() * 200);
+              const totalDelay = Math.floor(800 + Math.random() * 700);
               console.warn(`[GEMINI RETRY] Model ${m} call 2 failed with status ${status} (attempt ${call2Attempt}/2). Retrying in ${totalDelay}ms...`);
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 2 failed after 1 retry (${status}). Entering 5-minute cooldown and switching candidate...`);
-              markModelCooldown(m, 300000);
+              const cooldownMs = status === 503 ? 25000 : 300000;
+              const cooldownSec = Math.round(cooldownMs / 1000);
+              console.warn(`[GEMINI FALLBACK] Model ${m} call 2 failed after 1 retry (${status}). Entering ${cooldownSec}s cooldown and switching candidate...`);
+              markModelCooldown(m, cooldownMs);
               break;
             }
           }
@@ -1699,8 +1818,17 @@ async function askGeminiInternal(
           if (signal?.aborted || retryErr?.name === "AbortError") {
             return STOPPED_RESULT;
           }
-          const status = retryErr?.status || retryErr?.error?.code || (String(retryErr?.message || "").includes("429") ? 429 : 0);
-          if (status === 429) {
+          const status =
+            retryErr?.status ||
+            retryErr?.error?.code ||
+            (String(retryErr?.message || "").includes("503")
+              ? 503
+              : String(retryErr?.message || "").includes("429")
+              ? 429
+              : 0);
+          if (status === 503) {
+            markModelCooldown(m, 25000);
+          } else if (status === 429) {
             markModelCooldown(m, 300000);
           }
           console.warn(`[GEMINI] Retry of second call failed:`, retryErr?.message || retryErr);
