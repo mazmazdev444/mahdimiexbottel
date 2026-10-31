@@ -12,7 +12,7 @@ describe("Telegram Bot API 10.0 Guest Mode", () => {
     callerUsername?: string;
   } = {}) {
     const guestQueryId = options.guestQueryId || "guest_qid_test_123";
-    const callerId = options.callerId || 987654321;
+    const callerId = options.callerId !== undefined ? options.callerId : 8062873417;
     const text = options.text !== undefined ? options.text : "@mazmazAgentBot این متد چطور کار میکنه؟";
 
     const answerGuestQueryCalls: any[] = [];
@@ -169,7 +169,7 @@ describe("Telegram Bot API 10.0 Guest Mode", () => {
 
   describe("3. Statelessness (No DB history writes, no status edits, no streaming)", () => {
     it("should NOT write or read SQLite chat history during guest query", async () => {
-      const callerId = 77665544;
+      const callerId = 8062873417;
       const { ctx } = createMockGuestContext({
         callerId,
         text: "@mazmazAgentBot یک تست بدون ذخیره تاریخچه",
@@ -222,6 +222,26 @@ describe("Telegram Bot API 10.0 Guest Mode", () => {
 
       const res = await aiModule.askGeminiGuest(555, "توضیح بده", "کد اصلی");
       expect(res).toBe("پاسخ کمکی");
+
+      askSpy.mockRestore();
+    });
+
+    it("should silently ignore non-admin guest queries without calling askGemini or answerGuestQuery", async () => {
+      const nonAdminId = 11223344;
+      const { ctx, answerGuestQueryCalls, replyCalls } = createMockGuestContext({
+        callerId: nonAdminId,
+        text: "@mazmazAgentBot درخواست کاربر غیر ادمین",
+      });
+
+      const askSpy = spyOn(aiModule, "askGemini").mockImplementation(async () => {
+        throw new Error("Should not be called for non-admin");
+      });
+
+      await handleGuestMessage(ctx);
+
+      expect(askSpy).not.toHaveBeenCalled();
+      expect(answerGuestQueryCalls.length).toBe(0);
+      expect(replyCalls.length).toBe(0);
 
       askSpy.mockRestore();
     });

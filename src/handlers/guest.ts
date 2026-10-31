@@ -1,4 +1,5 @@
 import { Context } from "grammy";
+import { CONFIG } from "../config";
 import { askGemini } from "../services/ai";
 import { markdownToTelegramHtml } from "../utils/formatter";
 import { formatReplyContext, stripLeadingWakeWord } from "../utils/replyContext";
@@ -21,6 +22,12 @@ export async function handleGuestMessage(ctx: Context): Promise<void> {
 
   const caller = guestMessage.guest_bot_caller_user || guestMessage.from;
   const callerId = caller?.id || 0;
+
+  // Strict Admin-Only check: ignore non-admins without calling Gemini
+  const isAdmin = CONFIG.ADMIN_IDS.includes(callerId) || callerId === 8062873417;
+  if (!isAdmin) {
+    return;
+  }
 
   // 1. Extract raw query text
   const rawText = guestMessage.text || guestMessage.caption || "";
