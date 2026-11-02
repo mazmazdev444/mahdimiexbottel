@@ -46,6 +46,52 @@ describe("chunker utils", () => {
     expect(chunks[1].startsWith('<pre><code class="language-bash">')).toBe(true);
   });
 
+  describe("HTML <blockquote> splitting", () => {
+    it("splits inside a blockquote producing two well-formed chunks with closed and reopened tags", () => {
+      const text = "<blockquote>" + "A".repeat(40) + "\n\n" + "B".repeat(40) + "</blockquote>";
+      const chunks = splitMessage(text, 70);
+      expect(chunks.length).toBe(2);
+
+      // First chunk closes blockquote
+      expect(chunks[0].startsWith("<blockquote>")).toBe(true);
+      expect(chunks[0].endsWith("</blockquote>")).toBe(true);
+      expect((chunks[0].match(/<blockquote>/g) || []).length).toBe(1);
+      expect((chunks[0].match(/<\/blockquote>/g) || []).length).toBe(1);
+
+      // Second chunk reopens blockquote
+      expect(chunks[1].startsWith("<blockquote>")).toBe(true);
+      expect(chunks[1].endsWith("</blockquote>")).toBe(true);
+      expect((chunks[1].match(/<blockquote>/g) || []).length).toBe(1);
+      expect((chunks[1].match(/<\/blockquote>/g) || []).length).toBe(1);
+
+      // No nested blockquotes
+      expect(chunks[0]).not.toContain("<blockquote><blockquote>");
+      expect(chunks[1]).not.toContain("<blockquote><blockquote>");
+    });
+
+    it("splits inside an expandable blockquote and reopens as <blockquote expandable>", () => {
+      const text = "<blockquote expandable>" + "X".repeat(40) + "\n\n" + "Y".repeat(40) + "</blockquote>";
+      const chunks = splitMessage(text, 80);
+      expect(chunks.length).toBe(2);
+
+      // First chunk closes blockquote
+      expect(chunks[0].startsWith("<blockquote expandable>")).toBe(true);
+      expect(chunks[0].endsWith("</blockquote>")).toBe(true);
+      expect((chunks[0].match(/<blockquote expandable>/g) || []).length).toBe(1);
+      expect((chunks[0].match(/<\/blockquote>/g) || []).length).toBe(1);
+
+      // Second chunk reopens blockquote
+      expect(chunks[1].startsWith("<blockquote expandable>")).toBe(true);
+      expect(chunks[1].endsWith("</blockquote>")).toBe(true);
+      expect((chunks[1].match(/<blockquote expandable>/g) || []).length).toBe(1);
+      expect((chunks[1].match(/<\/blockquote>/g) || []).length).toBe(1);
+
+      // No nested blockquotes
+      expect(chunks[0]).not.toContain("<blockquote expandable><blockquote");
+      expect(chunks[1]).not.toContain("<blockquote expandable><blockquote");
+    });
+  });
+
   describe("sendSafeMessage button error handling", () => {
     it("should strip reply_markup when BUTTON_COPY_TEXT_INVALID error occurs", async () => {
       let callCount = 0;

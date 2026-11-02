@@ -208,12 +208,30 @@ export function markdownToTelegramHtml(markdown: string): string {
   formatted = formatted.replace(/\|\|([\s\S]+?)\|\|/g, "<tg-spoiler>$1</tg-spoiler>");
 
   // 5. Multi-line Blockquotes (standard & expandable)
-  formatted = formatted.replace(/(?:^&gt;(?:\!|\s*&gt;)?\s*.*(?:\n|$))+/gm, (match) => {
-    const isExpandable = match.includes("&gt;!") || match.includes("&gt;&gt;") || match.includes("&gt; &gt;");
-    const content = match
-      .replace(/^&gt;(?:\!|\s*&gt;)?\s?/gm, "")
-      .trim();
+  // Ensure fenced code blocks placeholders are never prefixed with quote markers
+  formatted = formatted.replace(/^[ \t]*(?:&gt;[ \t]*)+(\s*§§§CB\d+§§§)/gm, "$1");
+
+  formatted = formatted.replace(/(?:^[ \t]*&gt;.*(?:\r?\n|$))+/gm, (match) => {
+    // If this match contains a code block placeholder, do not wrap it
+    if (match.includes("§§§CB")) return match;
+
+    const rawLines = match.split(/\r?\n/);
+    const lines: string[] = [];
+    for (let i = 0; i < rawLines.length; i++) {
+      const rawLine = rawLines[i];
+      if (rawLine === "" && i === rawLines.length - 1) continue;
+      // Flatten all leading > and >> markers into the same blockquote
+      const stripped = rawLine.replace(/^[ \t]*(?:&gt;[ \t]*)+!?\s?/, "");
+      lines.push(stripped);
+    }
+
+    const content = lines.join("\n").trim();
     if (!content) return "";
+
+    // If blockquote is longer than 500 characters or more than 8 lines, emit expandable
+    const lineCount = content.split("\n").length;
+    const isExpandable = content.length > 500 || lineCount > 8;
+
     return isExpandable
       ? `<blockquote expandable>${content}</blockquote>\n`
       : `<blockquote>${content}</blockquote>\n`;

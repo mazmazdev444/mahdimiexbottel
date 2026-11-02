@@ -168,5 +168,61 @@ describe("formatter utils", () => {
     it("should handle spoilers", () => {
       expect(markdownToTelegramHtml("||Secret spoiler||")).toBe("<tg-spoiler>Secret spoiler</tg-spoiler>");
     });
+
+    describe("Blockquotes and expandable formatting (Telegram 10.0+)", () => {
+      it("converts consecutive lines that start with '>' into one blockquote", () => {
+        const md = "> line 1\n> line 2\n> line 3";
+        const html = markdownToTelegramHtml(md);
+        expect(html).toBe("<blockquote>line 1\nline 2\nline 3</blockquote>");
+      });
+
+      it("flattens lines starting with '>>' into the same single blockquote without nesting", () => {
+        const md = "> line 1\n>> line 2\n>>> line 3\n> line 4";
+        const html = markdownToTelegramHtml(md);
+        expect(html).toBe("<blockquote>line 1\nline 2\nline 3\nline 4</blockquote>");
+        expect(html).not.toContain("<blockquote><blockquote>");
+        expect(html).not.toContain("&gt;");
+      });
+
+      it("converts long quote (> 500 characters or > 8 lines) into expandable blockquote", () => {
+        // Test > 8 lines (9 lines)
+        const nineLines = Array.from({ length: 9 }, (_, i) => `> Line ${i + 1}`).join("\n");
+        const htmlLines = markdownToTelegramHtml(nineLines);
+        expect(htmlLines.startsWith("<blockquote expandable>")).toBe(true);
+        expect(htmlLines.endsWith("</blockquote>")).toBe(true);
+        expect(htmlLines).toContain("Line 1\nLine 2");
+
+        // Test > 500 characters
+        const longText = "> " + "A".repeat(505);
+        const htmlChars = markdownToTelegramHtml(longText);
+        expect(htmlChars.startsWith("<blockquote expandable>")).toBe(true);
+        expect(htmlChars.endsWith("</blockquote>")).toBe(true);
+      });
+
+      it("keeps short quote (<= 500 chars and <= 8 lines) as plain blockquote even with '>>'", () => {
+        const md = ">> Short nested quote\n> Second short line";
+        const html = markdownToTelegramHtml(md);
+        expect(html).toBe("<blockquote>Short nested quote\nSecond short line</blockquote>");
+        expect(html).not.toContain("expandable");
+      });
+
+      it("keeps code blocks untouched and does not wrap fenced code blocks in blockquote", () => {
+        const md = "> Quote before\n```python\ndef hello():\n    return 'world'\n```\n> Quote after";
+        const html = markdownToTelegramHtml(md);
+        expect(html).toContain("<blockquote>Quote before</blockquote>");
+        expect(html).toContain('<pre><code class="language-python">def hello():\n    return \'world\'</code></pre>');
+        expect(html).toContain("<blockquote>Quote after</blockquote>");
+        expect(html).not.toMatch(/<blockquote[^>]*>(?:(?!<\/blockquote>)[\s\S])*<pre>/);
+        expect(html).not.toMatch(/<pre[^>]*>(?:(?!<\/pre>)[\s\S])*<blockquote/);
+      });
+
+      it("still escapes raw <blockquote> written directly by model", () => {
+        const md = "Here is raw HTML: <blockquote>text</blockquote> and <blockquote expandable>more</blockquote>";
+        const html = markdownToTelegramHtml(md);
+        expect(html).toContain("&lt;blockquote&gt;text&lt;/blockquote&gt;");
+        expect(html).toContain("&lt;blockquote expandable&gt;more&lt;/blockquote&gt;");
+        expect(html).not.toContain("<blockquote>text</blockquote>");
+      });
+    });
   });
 });

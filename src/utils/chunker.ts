@@ -65,6 +65,32 @@ export function splitMessage(text: string, maxLen = 3800): string[] {
       remaining = `<pre><code class="language-${lang}">` + remaining;
     }
 
+    // Preserve open inline tags across chunks to avoid unclosed formatting
+    const inlineTags = ["b", "i", "s", "u", "code", "tg-spoiler"];
+    for (const tag of inlineTags) {
+      const openCount = (chunk.match(new RegExp(`<${tag}>`, "gi")) || []).length;
+      const closeCount = (chunk.match(new RegExp(`</${tag}>`, "gi")) || []).length;
+      if (openCount > closeCount) {
+        const diff = openCount - closeCount;
+        chunk += `</${tag}>`.repeat(diff);
+        remaining = `<${tag}>`.repeat(diff) + remaining;
+      }
+    }
+
+    // Preserve open HTML <blockquote> / <blockquote expandable> blocks across chunks
+    const openQuotes = (chunk.match(/<blockquote(?:\s+[^>]*)?>/gi) || []).length;
+    const closeQuotes = (chunk.match(/<\/blockquote>/gi) || []).length;
+    if (openQuotes > closeQuotes) {
+      const matches = [...chunk.matchAll(/<blockquote(\s+[^>]*)?>/gi)];
+      const lastMatch = matches[matches.length - 1];
+      const isExpandable = lastMatch ? /expandable/i.test(lastMatch[1] || "") : false;
+      const tagToReopen = isExpandable ? "<blockquote expandable>" : "<blockquote>";
+      chunk += "</blockquote>";
+      if (!remaining.startsWith("<blockquote")) {
+        remaining = tagToReopen + remaining;
+      }
+    }
+
     chunks.push(chunk);
   }
 
