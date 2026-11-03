@@ -9,7 +9,7 @@ import { getCryptoPrices } from "../services/crypto";
 import { getDollarAndGoldReport } from "../services/currency";
 import { addTask, incrementStat, checkAndConsumeQuota, formatQuotaFooter, getQuotaExceededMessage, getAllGroups, db, getSetting, setSetting, setGroupStatus } from "../db";
 import { CONFIG, updateGeminiApiKey, sanitizeApiKey } from "../config";
-import { sendSafeMessage, withTyping } from "../utils/chunker";
+import { sendSafeMessage, withTyping, logHtmlFallback } from "../utils/chunker";
 import { markdownToTelegramHtml, escapeHtml } from "../utils/formatter";
 import { getSmartReaction } from "../utils/reactions";
 import {
@@ -669,7 +669,8 @@ export async function handleTextMessage(ctx: Context) {
     if (finalMsg.length <= 4000) {
       try {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, { parse_mode: "HTML" });
-      } catch {
+      } catch (err: any) {
+        logHtmlFallback(err, finalMsg.length, ctx.chat?.type);
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg).catch(() => {});
       }
     } else {
@@ -700,7 +701,8 @@ export async function handleTextMessage(ctx: Context) {
     if (finalMsg.length <= 4000) {
       try {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, { parse_mode: "HTML" });
-      } catch {
+      } catch (err: any) {
+        logHtmlFallback(err, finalMsg.length, ctx.chat?.type);
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg).catch(() => {});
       }
     } else {
@@ -1080,6 +1082,7 @@ export async function handleTextMessage(ctx: Context) {
           parse_mode: "HTML",
         });
       } catch (e: any) {
+        logHtmlFallback(e, finalResponse.length, ctx.chat?.type);
         try {
           await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `${rawResponse}${formatQuotaFooter(userId)}`);
         } catch {

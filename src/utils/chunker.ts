@@ -122,6 +122,17 @@ export async function withTyping<T>(
 }
 
 /**
+ * Diagnostic logger for HTML parse_mode rejections falling back to plain text (STEP 0b).
+ * Logs ONE line with: Telegram error description (contains offset only), message length, and chat type.
+ * Never logs message text.
+ */
+export function logHtmlFallback(err: any, messageLength: number, chatType?: string): void {
+  const errDesc = String(err?.description || err?.message || "Unknown error");
+  const chatLabel = chatType === "private" ? "private" : "group";
+  console.warn(`Failed sending with parse_mode, falling back to plain text | error: ${errDesc} | length: ${messageLength} | chat: ${chatLabel}`);
+}
+
+/**
  * Sends a message safely to Telegram, automatically splitting into multiple
  * messages if it exceeds Telegram limits.
  */
@@ -151,9 +162,9 @@ export async function sendSafeMessage(
     try {
       await ctx.reply(chunks[i], opts);
     } catch (err: any) {
-      const errMsg = String(err?.message || "");
+      const errMsg = String(err?.description || err?.message || "");
       const isButtonError = errMsg.includes("BUTTON_") || errMsg.includes("REPLY_MARKUP_");
-      console.warn("Failed sending with parse_mode, falling back to plain text:", errMsg);
+      logHtmlFallback(err, chunks[i].length, ctx.chat?.type);
 
       const fallbackMarkup = isButtonError ? undefined : opts.reply_markup;
       try {

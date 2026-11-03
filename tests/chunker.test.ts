@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { splitMessage, sendSafeMessage } from "../src/utils/chunker";
+import { splitMessage, sendSafeMessage, logHtmlFallback } from "../src/utils/chunker";
 
 describe("chunker utils", () => {
   it("should not split text shorter than maxLen", () => {
@@ -147,6 +147,89 @@ describe("chunker utils", () => {
       expect(callCount).toBe(3);
       expect(lastOpts).toBeDefined();
       expect(lastOpts.reply_markup).toBeUndefined();
+    });
+  });
+
+  describe("STEP 0b logHtmlFallback diagnostic logger", () => {
+    it("should log ONE line with error description, message length, and private chat type without message text", () => {
+      const logs: string[] = [];
+      const origWarn = console.warn;
+      console.warn = (...args: any[]) => {
+        logs.push(args.join(" "));
+      };
+
+      try {
+        const fakeErr = {
+          description: "Bad Request: can't parse entities: can't find end of the entity starting at byte offset 120",
+        };
+        const messageText = "This is private user text that must never appear in logs!";
+        logHtmlFallback(fakeErr, messageText.length, "private");
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain("Failed sending with parse_mode, falling back to plain text");
+        expect(logs[0]).toContain("offset 120");
+        expect(logs[0]).toContain(`length: ${messageText.length}`);
+        expect(logs[0]).toContain("chat: private");
+        // Verify message text is NEVER logged
+        expect(logs[0]).not.toContain(messageText);
+        expect(logs[0]).not.toContain("private user text");
+      } finally {
+        console.warn = origWarn;
+      }
+    });
+
+    it("should log ONE line with group chat type for non-private chats", () => {
+      const logs: string[] = [];
+      const origWarn = console.warn;
+      console.warn = (...args: any[]) => {
+        logs.push(args.join(" "));
+      };
+
+      try {
+        const fakeErr = new Error("Bad Request: can't parse entities: Character '>' is reserved at byte offset 45");
+        logHtmlFallback(fakeErr, 250, "supergroup");
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain("offset 45");
+        expect(logs[0]).toContain("length: 250");
+        expect(logs[0]).toContain("chat: group");
+      } finally {
+        console.warn = origWarn;
+      }
+    });
+
+    it("sendSafeMessage should invoke logHtmlFallback on parse_mode rejection", async () => {
+      const logs: string[] = [];
+      const origWarn = console.warn;
+      console.warn = (...args: any[]) => {
+        logs.push(args.join(" "));
+      };
+
+      try {
+        const fakeCtx: any = {
+          chat: { id: -1001234567, type: "supergroup" },
+          message: { message_id: 999 },
+          reply: async (_text: string, opts: any) => {
+            if (opts?.parse_mode) {
+              const err: any = new Error("Bad Request: can't parse entities: unclosed tag at byte offset 88");
+              err.description = "Bad Request: can't parse entities: unclosed tag at byte offset 88";
+              throw err;
+            }
+            return { message_id: 1000 };
+          },
+        };
+
+        const secretUserText = "SENSITIVE_CONTENT_12345";
+        await sendSafeMessage(fakeCtx, `<b>${secretUserText}</b>`, { parse_mode: "HTML" });
+
+        expect(logs.length).toBe(1);
+        expect(logs[0]).toContain("offset 88");
+        expect(logs[0]).toContain(`length: ${`<b>${secretUserText}</b>`.length}`);
+        expect(logs[0]).toContain("chat: group");
+        expect(logs[0]).not.toContain(secretUserText);
+      } finally {
+        console.warn = origWarn;
+      }
     });
   });
 });

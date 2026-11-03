@@ -2,7 +2,7 @@ import { Context } from "grammy";
 import { askGemini } from "../services/ai";
 import { CONFIG } from "../config";
 import { markdownToTelegramHtml } from "../utils/formatter";
-import { withTyping, sendSafeMessage } from "../utils/chunker";
+import { withTyping, sendSafeMessage, logHtmlFallback } from "../utils/chunker";
 import { formatQuotaFooter, checkAndConsumeQuota, getQuotaExceededMessage } from "../db";
 import {
   downloadTelegramPhotoAsBase64,
@@ -115,6 +115,7 @@ export async function handlePhotoMessage(ctx: Context) {
             parse_mode: "HTML",
           });
         } catch (e: any) {
+          logHtmlFallback(e, finalMsg.length, ctx.chat?.type);
           await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(async () => {
             await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, `🖼️ تحلیل هوشمند تصویر:\n\n${rawAnalysis}${formatQuotaFooter(userId)}`).catch(() => {});
           });
