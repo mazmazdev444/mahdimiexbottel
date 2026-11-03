@@ -1,5 +1,6 @@
 import { CONFIG } from "../config";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import { cachedFetch } from "../utils/cache";
 
 const agent = CONFIG.USE_PROXY ? new HttpsProxyAgent(CONFIG.PROXY_URL) : undefined;
 
@@ -29,84 +30,87 @@ function toToman(rialStr?: string): number {
 }
 
 /**
- * Fetches live dollar, currencies, and gold prices from TGJU
+ * Fetches live dollar, currencies, and gold prices from TGJU (cached for 60s)
  */
 export async function fetchLiveCurrencyData(): Promise<CurrencyData | null> {
-  const url = "https://call4.tgju.org/ajax.json";
+  return cachedFetch("tgju_currency_data", async () => {
+    const url = "https://call4.tgju.org/ajax.json";
 
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        Accept: "application/json",
-      },
-      // @ts-ignore
-      agent,
-    });
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(8000),
+        // @ts-ignore
+        agent,
+      });
 
-    if (!res.ok) return null;
+      if (!res.ok) return null;
 
-    const json = (await res.json()) as any;
-    const data = json?.current || {};
+      const json = (await res.json()) as any;
+      const data = json?.current || {};
 
-    const usd = data["price_dollar_rl"] || {};
-    const usdt = data["crypto-tether-irr"] || {};
-    const eur = data["price_eur"] || {};
-    const aed = data["price_aed"] || {};
-    const gold = data["geram18"] || {};
-    const coin = data["sekee"] || {};
-    const ons = data["ons"] || {};
+      const usd = data["price_dollar_rl"] || {};
+      const usdt = data["crypto-tether-irr"] || {};
+      const eur = data["price_eur"] || {};
+      const aed = data["price_aed"] || {};
+      const gold = data["geram18"] || {};
+      const coin = data["sekee"] || {};
+      const ons = data["ons"] || {};
 
-    const dollar = toToman(usd.p);
-    const dollarLow = toToman(usd.l);
-    const dollarHigh = toToman(usd.h);
-    const dollarChange = toToman(usd.d);
-    const dollarChangePercent = parseFloat(usd.dp) || 0;
-    const dollarDirection = usd.dt || (dollarChangePercent >= 0 ? "high" : "low");
+      const dollar = toToman(usd.p);
+      const dollarLow = toToman(usd.l);
+      const dollarHigh = toToman(usd.h);
+      const dollarChange = toToman(usd.d);
+      const dollarChangePercent = parseFloat(usd.dp) || 0;
+      const dollarDirection = usd.dt || (dollarChangePercent >= 0 ? "high" : "low");
 
-    const now = new Date();
-    const dateStr = new Intl.DateTimeFormat("fa-IR", {
-      dateStyle: "full",
-      timeZone: "Asia/Tehran",
-    }).format(now);
-    const timeStr =
-      usd.t ||
-      new Intl.DateTimeFormat("fa-IR", {
-        timeStyle: "medium",
+      const now = new Date();
+      const dateStr = new Intl.DateTimeFormat("fa-IR", {
+        dateStyle: "full",
         timeZone: "Asia/Tehran",
       }).format(now);
+      const timeStr =
+        usd.t ||
+        new Intl.DateTimeFormat("fa-IR", {
+          timeStyle: "medium",
+          timeZone: "Asia/Tehran",
+        }).format(now);
 
-    const range = dollarHigh - dollarLow;
-    const rangePercent =
-      range > 0
-        ? Math.min(100, Math.max(0, Math.round(((dollar - dollarLow) / range) * 100)))
-        : 50;
+      const range = dollarHigh - dollarLow;
+      const rangePercent =
+        range > 0
+          ? Math.min(100, Math.max(0, Math.round(((dollar - dollarLow) / range) * 100)))
+          : 50;
 
-    const chartUrl = generateDollarChartUrl(dollarLow, dollar, dollarHigh);
+      const chartUrl = generateDollarChartUrl(dollarLow, dollar, dollarHigh);
 
-    return {
-      dollar,
-      dollarLow,
-      dollarHigh,
-      dollarChange,
-      dollarChangePercent,
-      dollarDirection,
-      tether: toToman(usdt.p),
-      euro: toToman(eur.p),
-      dirham: toToman(aed.p),
-      gold18: toToman(gold.p),
-      coinEmami: toToman(coin.p),
-      ounceGold: ons.p || "0",
-      dateStr,
-      timeStr,
-      rangePercent,
-      chartUrl,
-    };
-  } catch (err: any) {
-    console.error("Failed to fetch live currency from TGJU:", err?.message || err);
-    return null;
-  }
+      return {
+        dollar,
+        dollarLow,
+        dollarHigh,
+        dollarChange,
+        dollarChangePercent,
+        dollarDirection,
+        tether: toToman(usdt.p),
+        euro: toToman(eur.p),
+        dirham: toToman(aed.p),
+        gold18: toToman(gold.p),
+        coinEmami: toToman(coin.p),
+        ounceGold: ons.p || "0",
+        dateStr,
+        timeStr,
+        rangePercent,
+        chartUrl,
+      };
+    } catch (err: any) {
+      console.error("Failed to fetch live currency from TGJU:", err?.message || err);
+      return null;
+    }
+  }, 60_000);
 }
 
 /**

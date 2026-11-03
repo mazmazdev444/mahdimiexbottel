@@ -169,7 +169,8 @@ export async function captureWebScreenshot(ctx: Context, url: string, caption?: 
       // در صورتی که سرور تلگرام نتوانست مستقیم دانلود کند (مثلاً هدر رفرر)، بافر را دانلود و ارسال می‌کنیم
       try {
         const res = await fetch(targetUrl, {
-          headers: { "User-Agent": REALISTIC_DESKTOP_UA }
+          headers: { "User-Agent": REALISTIC_DESKTOP_UA },
+          signal: AbortSignal.timeout(10000),
         });
         if (res.ok) {
           const buffer = Buffer.from(await res.arrayBuffer());
@@ -229,6 +230,7 @@ export async function executeWebTool(ctx: Context, name: string, args: any): Pro
 
       const fetchOpts: any = {
         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        signal: AbortSignal.timeout(15000),
       };
       if (agent) {
         fetchOpts.agent = agent;

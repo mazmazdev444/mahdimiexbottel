@@ -1,18 +1,9 @@
-import { Context, InlineKeyboard } from "grammy";
+import { Bot, Context, InlineKeyboard } from "grammy";
 import { CONFIG } from "../config";
 import { markdownToTelegramHtml } from "../utils/formatter";
-import {
-  getUserCount,
-  getAllUsers,
-  approveUser,
-  rejectUser,
-  getUserById,
-  getTasks,
-  addTask,
-  toggleTask,
-  deleteTask,
-  getStats,
-} from "../db";
+import { getTasks, toggleTask, deleteTask } from "../db";
+import { runningTasks } from "./message";
+import { clearUserHistory } from "../services/ai";
 
 export function getMainMenu(userId: number): InlineKeyboard {
   const kb = new InlineKeyboard()
@@ -35,7 +26,7 @@ export function getMainMenu(userId: number): InlineKeyboard {
   return kb;
 }
 
-export async function handleStart(ctx: Context) {
+export async function handleStart(ctx: Context): Promise<void> {
   const user = ctx.from;
   const name = user?.first_name || "رفیق";
   const isAdmin = CONFIG.ADMIN_IDS.includes(user?.id || 0);
@@ -69,7 +60,7 @@ export async function handleStart(ctx: Context) {
   });
 }
 
-export async function handleHelp(ctx: Context) {
+export async function handleHelp(ctx: Context): Promise<void> {
   const help = (
     `📖 <b>راهنمای دستورات و کارکرد ربات mazmaz:</b>\n\n` +
     `• <code>/start</code> - شروع گفتگو و نمایش منوی اصلی\n` +
@@ -90,7 +81,46 @@ export async function handleHelp(ctx: Context) {
   await ctx.reply(markdownToTelegramHtml(help), { parse_mode: "HTML" });
 }
 
-export async function renderTasksMenu(ctx: Context, userId: number, editMessage = false) {
+export async function handleStop(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  const senderId = ctx.from?.id;
+  const runningTask = chatId !== undefined ? runningTasks.get(chatId) : undefined;
+
+  let taskStopped = false;
+  let unauthorizedStop = false;
+
+  if (runningTask) {
+    const isOwner = senderId !== undefined && runningTask.ownerId === senderId;
+    const isAdmin = senderId !== undefined && CONFIG.ADMIN_IDS.includes(senderId);
+
+    if (isOwner || isAdmin) {
+      runningTask.controller.abort();
+      runningTasks.delete(chatId!);
+      taskStopped = true;
+    } else {
+      unauthorizedStop = true;
+    }
+  }
+
+  if (ctx.from) {
+    clearUserHistory(ctx.from.id);
+  }
+
+  let replyText = "";
+  if (unauthorizedStop) {
+    replyText = "فقط درخواست‌دهنده یا مدیر می‌تواند عملیات را متوقف کند.";
+  } else if (taskStopped) {
+    replyText = "⛔ عملیات در حال اجرا متوقف شد و حافظه مکالمه پاک گردید.";
+  } else {
+    replyText = "هیچ عملیات فعالی در حال اجرا نبود. حافظه مکالمه پاک شد.";
+  }
+
+  await ctx.reply(replyText, {
+    reply_parameters: { message_id: ctx.message!.message_id, allow_sending_without_reply: true },
+  });
+}
+
+export async function renderTasksMenu(ctx: Context, userId: number, editMessage = false): Promise<void> {
   const tasks = getTasks(userId);
   const kb = new InlineKeyboard();
 
@@ -100,7 +130,6 @@ export async function renderTasksMenu(ctx: Context, userId: number, editMessage 
   } else {
     for (const t of tasks) {
       const icon = t.is_done ? "✅" : "⬜";
-      const title = t.is_done ? `<s>${t.title}</s>` : t.title;
       kb.text(`${icon} ${t.title.slice(0, 25)}`, `task_tog:${t.id}`)
         .text("🗑️", `task_del:${t.id}`)
         .row();
@@ -110,8 +139,42 @@ export async function renderTasksMenu(ctx: Context, userId: number, editMessage 
   kb.text("🔙 بازگشت به منو", "menu_home");
 
   if (editMessage && ctx.callbackQuery) {
-    await ctx.editMessageText(text, { reply_markup: kb, parse_mode: "HTML" });
+    await ctx.editMessageText(text, { reply_markup: kb, parse_mode: "HTML" }).catch(() => {});
   } else {
     await ctx.reply(text, { reply_markup: kb, parse_mode: "HTML" });
   }
+}
+
+export function registerCoreHandlers(bot: Bot): void {
+  bot.command(["start", "start@mazmazAgentBot"], handleStart);
+  bot.command(["help", "help@mazmazAgentBot"], handleHelp);
+  bot.command(["tasks", "tasks@mazmazAgentBot"], (ctx) => renderTasksMenu(ctx, ctx.from!.id));
+  bot.command(["stop", "stop@mazmazAgentBot"], handleStop);
+
+  bot.callbackQuery(/^task_tog:(\d+)$/, async (ctx) => {
+    const taskId = parseInt(ctx.match[1], 10);
+    toggleTask(taskId, ctx.from!.id);
+    await renderTasksMenu(ctx, ctx.from!.id, true);
+    await ctx.answerCallbackQuery({ text: "وضعیت تغییر کرد." });
+  });
+
+  bot.callbackQuery(/^task_del:(\d+)$/, async (ctx) => {
+    const taskId = parseInt(ctx.match[1], 10);
+    deleteTask(taskId, ctx.from!.id);
+    await renderTasksMenu(ctx, ctx.from!.id, true);
+    await ctx.answerCallbackQuery({ text: "تسک حذف شد." });
+  });
+
+  bot.callbackQuery("menu_home", async (ctx) => {
+    await ctx.editMessageText("🏠 <b>منوی اصلی ربات mazmaz:</b>\nچطور می‌تونم کمکت کنم؟", {
+      reply_markup: getMainMenu(ctx.from!.id),
+      parse_mode: "HTML",
+    }).catch(() => {});
+    await ctx.answerCallbackQuery();
+  });
+
+  bot.callbackQuery("menu_tasks", async (ctx) => {
+    await renderTasksMenu(ctx, ctx.from!.id, true);
+    await ctx.answerCallbackQuery();
+  });
 }

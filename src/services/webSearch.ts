@@ -47,6 +47,7 @@ async function searchTavily(query: string, maxResults: number): Promise<string |
       include_answer: true,
       max_results: maxResults,
     }),
+    signal: AbortSignal.timeout(10000),
     // @ts-ignore
     agent,
   });
@@ -84,6 +85,7 @@ async function searchBrave(query: string, maxResults: number): Promise<string | 
       Accept: "application/json",
       "X-Subscription-Token": CONFIG.BRAVE_API_KEY,
     },
+    signal: AbortSignal.timeout(10000),
     // @ts-ignore
     agent,
   });
@@ -113,6 +115,7 @@ async function searchSearXNG(query: string, maxResults: number): Promise<string 
   const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json&categories=general`;
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!res.ok) return null;
@@ -147,6 +150,7 @@ async function searchDuckDuckGoLite(query: string, maxResults: number): Promise<
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
       body: "q=" + encodeURIComponent(query),
+      signal: AbortSignal.timeout(10000),
       // @ts-ignore
       agent,
     });
@@ -197,6 +201,7 @@ async function searchGoogleNews(query: string, maxResults: number): Promise<stri
 
   try {
     const res = await fetch(url, {
+      signal: AbortSignal.timeout(10000),
       // @ts-ignore
       agent,
     });

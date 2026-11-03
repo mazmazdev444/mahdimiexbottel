@@ -1,5 +1,6 @@
 import { CONFIG } from "../config";
 import { HttpsProxyAgent } from "https-proxy-agent";
+import { cachedFetch } from "../utils/cache";
 
 const agent = CONFIG.USE_PROXY ? new HttpsProxyAgent(CONFIG.PROXY_URL) : undefined;
 
@@ -101,65 +102,69 @@ export async function getWeather(cityName = "تهران"): Promise<string> {
   const rawCity = cityName.trim() || "تهران";
   const cleanCity = rawCity.toLowerCase().replace(/[ي]/g, "ی").replace(/[ك]/g, "ک");
 
-  try {
-    let lat = 35.6892;
-    let lon = 51.389;
-    let displayCity = rawCity;
+  return cachedFetch(`weather:${cleanCity}`, async () => {
+    try {
+      let lat = 35.6892;
+      let lon = 51.389;
+      let displayCity = rawCity;
 
-    // ۱. بررسی بانک داخلی شهرهای ایران برای سرعت و دقت حداکثری
-    if (IRAN_CITIES[cleanCity] || IRAN_CITIES[rawCity]) {
-      const match = IRAN_CITIES[cleanCity] || IRAN_CITIES[rawCity];
-      lat = match.lat;
-      lon = match.lon;
-      displayCity = match.nameFa;
-    } else {
-      // ۲. در صورتی که شهر در بانک داخلی نبود، استعلام ژئوکدینگ جهانی با پشتیبانی زبان فارسی
-      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawCity)}&count=1&language=fa&format=json`;
-      const gRes = await fetch(geoUrl, {
+      // ۱. بررسی بانک داخلی شهرهای ایران برای سرعت و دقت حداکثری
+      if (IRAN_CITIES[cleanCity] || IRAN_CITIES[rawCity]) {
+        const match = IRAN_CITIES[cleanCity] || IRAN_CITIES[rawCity];
+        lat = match.lat;
+        lon = match.lon;
+        displayCity = match.nameFa;
+      } else {
+        // ۲. در صورتی که شهر در بانک داخلی نبود، استعلام ژئوکدینگ جهانی با پشتیبانی زبان فارسی
+        const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(rawCity)}&count=1&language=fa&format=json`;
+        const gRes = await fetch(geoUrl, {
+          signal: AbortSignal.timeout(6000),
+          // @ts-ignore
+          agent,
+        });
+
+        if (gRes.ok) {
+          const gData = (await gRes.json()) as any;
+          if (gData.results && gData.results.length > 0) {
+            lat = gData.results[0].latitude;
+            lon = gData.results[0].longitude;
+            displayCity = gData.results[0].name || rawCity;
+          }
+        }
+      }
+
+      // دریافت وضعیت لحظه‌ای و پیش‌بینی امروز
+      const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
+      const wRes = await fetch(wUrl, {
+        signal: AbortSignal.timeout(8000),
         // @ts-ignore
         agent,
       });
 
-      if (gRes.ok) {
-        const gData = (await gRes.json()) as any;
-        if (gData.results && gData.results.length > 0) {
-          lat = gData.results[0].latitude;
-          lon = gData.results[0].longitude;
-          displayCity = gData.results[0].name || rawCity;
-        }
-      }
+      if (!wRes.ok) return "خطا در دریافت وضعیت آب و هوا از سرور هواشناسی.";
+
+      const wData = (await wRes.json()) as any;
+      const cur = wData.current || {};
+      const daily = wData.daily || {};
+      const cond = WEATHER_CODES[cur.weather_code] || "آرام و معتدل";
+
+      const maxTemp = daily.temperature_2m_max?.[0] !== undefined ? `${daily.temperature_2m_max[0]}°C` : "نامشخص";
+      const minTemp = daily.temperature_2m_min?.[0] !== undefined ? `${daily.temperature_2m_min[0]}°C` : "نامشخص";
+      const rainProb = daily.precipitation_probability_max?.[0] !== undefined ? `${daily.precipitation_probability_max[0]}%` : "0%";
+
+      return (
+        `🌤️ <b>وضعیت زنده آب و هوای ${displayCity}:</b>\n\n` +
+        `🌡️ دمای فعلی: <b>${cur.temperature_2m}°C</b> (حس واقعی: ${cur.apparent_temperature}°C)\n` +
+        `☁️ شرایط جوی: <b>${cond}</b>\n` +
+        `📈 بیشینه و کمینه امروز: <b>${maxTemp} / ${minTemp}</b>\n` +
+        `💧 رطوبت نسبی: <b>${cur.relative_humidity_2m}%</b>\n` +
+        `🌧️ احتمال بارش: <b>${rainProb}</b>\n` +
+        `💨 سرعت باد: <b>${cur.wind_speed_10m} km/h</b>`
+      );
+    } catch (err: any) {
+      return `خطا در استعلام وضعیت آب و هوا: ${err.message || err}`;
     }
-
-    // دریافت وضعیت لحظه‌ای و پیش‌بینی امروز
-    const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
-    const wRes = await fetch(wUrl, {
-      // @ts-ignore
-      agent,
-    });
-
-    if (!wRes.ok) return "خطا در دریافت وضعیت آب و هوا از سرور هواشناسی.";
-
-    const wData = (await wRes.json()) as any;
-    const cur = wData.current || {};
-    const daily = wData.daily || {};
-    const cond = WEATHER_CODES[cur.weather_code] || "آرام و معتدل";
-
-    const maxTemp = daily.temperature_2m_max?.[0] !== undefined ? `${daily.temperature_2m_max[0]}°C` : "نامشخص";
-    const minTemp = daily.temperature_2m_min?.[0] !== undefined ? `${daily.temperature_2m_min[0]}°C` : "نامشخص";
-    const rainProb = daily.precipitation_probability_max?.[0] !== undefined ? `${daily.precipitation_probability_max[0]}%` : "0%";
-
-    return (
-      `🌤️ <b>وضعیت زنده آب و هوای ${displayCity}:</b>\n\n` +
-      `🌡️ دمای فعلی: <b>${cur.temperature_2m}°C</b> (حس واقعی: ${cur.apparent_temperature}°C)\n` +
-      `☁️ شرایط جوی: <b>${cond}</b>\n` +
-      `📈 بیشینه و کمینه امروز: <b>${maxTemp} / ${minTemp}</b>\n` +
-      `💧 رطوبت نسبی: <b>${cur.relative_humidity_2m}%</b>\n` +
-      `🌧️ احتمال بارش: <b>${rainProb}</b>\n` +
-      `💨 سرعت باد: <b>${cur.wind_speed_10m} km/h</b>`
-    );
-  } catch (err: any) {
-    return `خطا در استعلام وضعیت آب و هوا: ${err.message || err}`;
-  }
+  }, 60_000);
 }
 
 export function extractWeatherIntent(text: string): { isWeather: boolean; city: string } {
