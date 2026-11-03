@@ -1,5 +1,6 @@
 import { Context, InlineKeyboard } from "grammy";
 import { CONFIG } from "../config";
+import { markdownToTelegramHtml } from "../utils/formatter";
 import {
   getUserCount,
   getAllUsers,
@@ -62,7 +63,7 @@ export async function handleStart(ctx: Context) {
 
   const welcome = isAdmin ? adminWelcome : userWelcome;
 
-  await ctx.reply(welcome, {
+  await ctx.reply(markdownToTelegramHtml(welcome), {
     reply_markup: getMainMenu(user?.id || 0),
     parse_mode: "HTML",
   });
@@ -86,7 +87,7 @@ export async function handleHelp(ctx: Context) {
     `• ارسال هر لینک یا عکس - تحلیل محتوا با هوش مصنوعی\n\n` +
     `💡 <i>توی گروه‌ها هم هر وقت بگی «مزمز» یا ریپلای کنی درجا جوابت رو میده!</i>`
   );
-  await ctx.reply(help, { parse_mode: "HTML" });
+  await ctx.reply(markdownToTelegramHtml(help), { parse_mode: "HTML" });
 }
 
 export async function renderTasksMenu(ctx: Context, userId: number, editMessage = false) {

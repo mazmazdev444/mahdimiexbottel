@@ -159,10 +159,26 @@ describe("formatter utils", () => {
       expect(html).toContain("• Item 2");
     });
 
-    it.skip("should auto-balance open tags", () => {
+    it("should auto-balance open tags", () => {
       const broken = "<b>Unclosed bold tag";
       const balanced = markdownToTelegramHtml(broken);
       expect(balanced).toBe("<b>Unclosed bold tag</b>");
+    });
+
+    it("should preserve existing valid Telegram HTML tags without escaping them", () => {
+      const mixed = "<b>bold</b>, <i>italic</i>, <code>code</code> with 1 < 5";
+      const result = markdownToTelegramHtml(mixed);
+      expect(result).toContain("<b>bold</b>");
+      expect(result).toContain("<i>italic</i>");
+      expect(result).toContain("<code>code</code>");
+      expect(result).toContain("1 &lt; 5");
+    });
+
+    it("should be idempotent (formatting twice produces identical result)", () => {
+      const md = "# Header\n**bold** and `code`\n[link](https://example.com)";
+      const once = markdownToTelegramHtml(md);
+      const twice = markdownToTelegramHtml(once);
+      expect(twice).toBe(once);
     });
 
     it("should handle spoilers", () => {

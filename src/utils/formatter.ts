@@ -198,9 +198,18 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 2.3 Markdown & Parser Safety: remove trailing raw backslashes at end of lines
   formatted = formatted.replace(/\\+(\s*)$/gm, "$1");
 
-  // 3. Escape HTML special characters in the text
+  // 2.4 Extract and preserve already-existing valid Telegram HTML tags
+  const htmlTags: string[] = [];
+  const TELEGRAM_HTML_TAG_REGEX = /<\/?(?:b|strong|i|em|u|ins|s|strike|del|tg-spoiler|code|pre)(?:\s+[^>]*)?>|<a\s+(?:[^>]*?\s+)?href="[^"]*"(?:\s+[^>]*)?>|<\/a>|<tg-emoji\s+(?:[^>]*?\s+)?(?:emoji-id|id)="[^"]*"(?:\s+[^>]*)?>|<\/tg-emoji>/gi;
+  formatted = formatted.replace(TELEGRAM_HTML_TAG_REGEX, (tag) => {
+    const index = htmlTags.length;
+    htmlTags.push(tag);
+    return `§§§HT${index}§§§`;
+  });
+
+  // 3. Escape HTML special characters in the text (preserving already valid HTML entities)
   formatted = formatted
-    .replace(/&/g, "&amp;")
+    .replace(/&(?!([a-zA-Z0-9]+|#\d+|#x[0-9a-fA-F]+);)/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
@@ -273,6 +282,11 @@ export function markdownToTelegramHtml(markdown: string): string {
   // 16. Restore code blocks
   formatted = formatted.replace(/§§§CB(\d+)§§§/g, (_, idx) => {
     return codeBlocks[Number(idx)] || "";
+  });
+
+  // 17. Restore preserved HTML tags
+  formatted = formatted.replace(/§§§HT(\d+)§§§/g, (_, idx) => {
+    return htmlTags[Number(idx)] || "";
   });
 
   // Clean excessive blank lines

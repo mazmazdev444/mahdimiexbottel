@@ -70,6 +70,7 @@ export async function handleTextMessage(ctx: Context) {
       message_id: ctx.message!.message_id,
       allow_sending_without_reply: true,
     },
+    parse_mode: "HTML" as const,
   };
 
   // پاسخ مستقیم ادمین (مهدی) به گزارش یا پیام کاربر
@@ -665,7 +666,8 @@ export async function handleTextMessage(ctx: Context) {
       parse_mode: "HTML",
     });
     const analysis = await withTyping(ctx, () => fetchAndAnalyzeLink(userId, text));
-    const finalMsg = `${analysis}${formatQuotaFooter(userId)}`;
+    const formattedAnalysis = markdownToTelegramHtml(analysis);
+    const finalMsg = `${formattedAnalysis}${formatQuotaFooter(userId)}`;
     if (finalMsg.length <= 4000) {
       try {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, { parse_mode: "HTML" });
@@ -697,7 +699,8 @@ export async function handleTextMessage(ctx: Context) {
     });
     const query = text.replace(/بنچمارک|benchmark/gi, "").trim() || "all";
     const result = await withTyping(ctx, () => queryBenchmark(userId, query));
-    const finalMsg = `${result}${formatQuotaFooter(userId)}`;
+    const formattedResult = markdownToTelegramHtml(result);
+    const finalMsg = `${formattedResult}${formatQuotaFooter(userId)}`;
     if (finalMsg.length <= 4000) {
       try {
         await ctx.api.editMessageText(ctx.chat!.id, statusMsg.message_id, finalMsg, { parse_mode: "HTML" });

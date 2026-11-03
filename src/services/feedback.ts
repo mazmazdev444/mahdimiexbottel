@@ -63,6 +63,7 @@ export async function handleBugReport(ctx: Context, text: string) {
       message_id: ctx.message!.message_id,
       allow_sending_without_reply: true,
     },
+    parse_mode: "HTML" as const,
   };
 
   saveFeedbackReport(info.userId, "bug", text, ctx.chat?.title || "پی‌وی", ctx.chat!.id);
@@ -117,6 +118,7 @@ export async function handleFeedbackOrCriticism(ctx: Context, text: string) {
       message_id: ctx.message!.message_id,
       allow_sending_without_reply: true,
     },
+    parse_mode: "HTML" as const,
   };
 
   saveFeedbackReport(
@@ -172,6 +174,7 @@ export async function handleProfanityAlert(
       message_id: ctx.message!.message_id,
       allow_sending_without_reply: true,
     },
+    parse_mode: "HTML" as const,
   };
 
   saveFeedbackReport(

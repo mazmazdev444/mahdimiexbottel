@@ -462,7 +462,7 @@ export async function sendMusicToTelegram(
       if (statusMsg && ctx?.api?.editMessageText) {
         await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, `❌ ${errorMsg}`).catch(() => {});
       } else if (ctx?.reply) {
-        await ctx.reply(`❌ ${errorMsg}`);
+        await ctx.reply(`❌ ${errorMsg}`, { parse_mode: "HTML" });
       }
       return { ok: false, message: errorMsg };
     }
@@ -507,7 +507,7 @@ export async function sendMusicToTelegram(
     if (statusMsg && ctx?.api?.editMessageText) {
       await ctx.api.editMessageText(ctx.chat.id, statusMsg.message_id, `❌ ${errorMsg}`).catch(() => {});
     } else if (ctx?.reply) {
-      await ctx.reply(`❌ ${errorMsg}`).catch(() => {});
+      await ctx.reply(`❌ ${errorMsg}`, { parse_mode: "HTML" }).catch(() => {});
     }
     return { ok: false, message: errorMsg };
   } finally {

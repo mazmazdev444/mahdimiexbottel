@@ -1,4 +1,5 @@
 import { Context } from "grammy";
+import { markdownToTelegramHtml } from "./formatter";
 
 /**
  * Splits text into Telegram-safe chunks (max 3800 characters)
@@ -145,7 +146,9 @@ export async function sendSafeMessage(
     reply_parameters?: any;
   } = { parse_mode: "HTML" }
 ) {
-  const chunks = splitMessage(text);
+  const isHtml = !options.parse_mode || options.parse_mode === "HTML";
+  const processedText = isHtml ? markdownToTelegramHtml(text) : text;
+  const chunks = splitMessage(processedText);
   const defaultReplyParams = ctx.message?.message_id
     ? { message_id: ctx.message.message_id, allow_sending_without_reply: true }
     : undefined;
@@ -156,6 +159,7 @@ export async function sendSafeMessage(
     const isLast = i === chunks.length - 1;
     const opts: any = {
       ...options,
+      parse_mode: isHtml ? "HTML" : options.parse_mode,
       reply_markup: isLast ? options.reply_markup : undefined,
       reply_parameters: isFirst ? replyParams : undefined,
     };
@@ -171,6 +175,8 @@ export async function sendSafeMessage(
         await ctx.reply(chunks[i], {
           reply_markup: fallbackMarkup,
           reply_parameters: opts.reply_parameters,
+          parse_mode: null as any,
+          _rawText: true,
         });
       } catch (fallbackErr: any) {
         // If fallback with reply_markup failed, retry once more completely stripped of reply_markup
@@ -178,6 +184,8 @@ export async function sendSafeMessage(
           console.warn("Fallback with reply_markup failed, retrying plain text without markup:", fallbackErr?.message);
           await ctx.reply(chunks[i], {
             reply_parameters: opts.reply_parameters,
+            parse_mode: null as any,
+            _rawText: true,
           }).catch((finalErr) => {
             console.error("Critical: Failed to deliver text message even without markup:", finalErr?.message);
           });

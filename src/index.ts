@@ -59,7 +59,7 @@ import {
 import { ADMIN_REPLY_TARGET } from "./services/feedback";
 import { LATEST_CHANGELOG } from "./latest_changelog";
 import { sendSafeMessage, withTyping } from "./utils/chunker";
-import { escapeHtml } from "./utils/formatter";
+import { escapeHtml, markdownToTelegramHtml } from "./utils/formatter";
 import { downloadMedia, cleanupFile, getMediaUrl } from "./services/mediaDownloader";
 import { sendMusicToTelegram } from "./services/musicService";
 import { generateChatDigest } from "./services/digestService";
@@ -140,6 +140,54 @@ export const bot = new Bot(CONFIG.BOT_TOKEN, {
       agent,
     },
   },
+});
+
+// Outgoing Send Pipeline Transformer:
+// Intercepts all outgoing sendMessage calls to ensure text passes through markdownToTelegramHtml
+// and strictly includes parse_mode: 'HTML' unless explicitly bypassed (e.g. fallback plain-text).
+bot.api.config.use(async (prev, method, payload: any, signal) => {
+  if (method === "sendMessage" && typeof payload?.text === "string") {
+    if (payload.parse_mode === null || payload._rawText) {
+      delete payload._rawText;
+      if (payload.parse_mode === null) delete payload.parse_mode;
+    } else {
+      payload.text = markdownToTelegramHtml(payload.text);
+      if (!payload.parse_mode) {
+        payload.parse_mode = "HTML";
+      }
+    }
+  } else if (method === "editMessageText" && typeof payload?.text === "string") {
+    if (payload.parse_mode === null || payload._rawText) {
+      delete payload._rawText;
+      if (payload.parse_mode === null) delete payload.parse_mode;
+    } else if (payload.parse_mode === "HTML") {
+      payload.text = markdownToTelegramHtml(payload.text);
+    }
+  }
+  return prev(method, payload, signal);
+});
+
+// Outgoing Send Pipeline Middleware:
+// Wraps ctx.reply so that every outgoing message passes through markdownToTelegramHtml
+// before reply and strictly has parse_mode: 'HTML' passed in options.
+bot.use(async (ctx, next) => {
+  const originalReply = ctx.reply.bind(ctx);
+  ctx.reply = (text: string, other?: any) => {
+    if (typeof text === "string") {
+      if (other?.parse_mode === null || (other as any)?._rawText) {
+        const { _rawText, ...rest } = other || {};
+        return originalReply(text, rest);
+      }
+      const formatted = markdownToTelegramHtml(text);
+      const opts = {
+        ...other,
+        parse_mode: (other?.parse_mode || "HTML") as any,
+      };
+      return originalReply(formatted, opts);
+    }
+    return originalReply(text, other);
+  };
+  await next();
 });
 
 // Entry middleware: raw update logging for debug pipeline & immediate guest_message routing
