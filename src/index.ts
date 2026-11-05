@@ -10,6 +10,9 @@ import { registerQuotaHandlers } from "./handlers/quota";
 import { registerAiHandlers } from "./handlers/ai";
 import { registerAdminHandlers } from "./handlers/admin";
 import { registerMediaHandlers } from "./handlers/media";
+import { registerUserAiHandlers } from "./handlers/userAiCommands";
+import { registerUserUtilityHandlers } from "./handlers/userUtilityCommands";
+import { registerUserOwnerHandlers } from "./handlers/userOwnerCommands";
 import { registerBotCommands } from "./handlers/commandRegistry";
 import { handlePhotoMessage } from "./handlers/photo";
 import { handleTextMessage } from "./handlers/message";
@@ -283,6 +286,9 @@ registerQuotaHandlers(bot);
 registerAiHandlers(bot);
 registerAdminHandlers(bot);
 registerMediaHandlers(bot);
+registerUserAiHandlers(bot);
+registerUserUtilityHandlers(bot);
+registerUserOwnerHandlers(bot);
 
 // 3. Register Photo & Vision Handler
 bot.on("message:photo", handlePhotoMessage);

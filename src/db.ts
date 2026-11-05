@@ -158,6 +158,14 @@ db.run(`
     approved INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes (user_id, id ASC);
 `);
 
 try {
@@ -501,6 +509,8 @@ export function rejectUser(userId: number) {
 export function getUserById(userId: number) {
   return db.query("SELECT * FROM users WHERE user_id = ?").get(userId) as any;
 }
+
+export const getUser = getUserById;
 
 export function getAllUsers() {
   return db.query("SELECT * FROM users ORDER BY created_at DESC").all() as any[];
@@ -911,6 +921,119 @@ export function clearChatContext(chatId: number): void {
     db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
   } catch (e) {
     console.error("Error clearing chat context:", e);
+  }
+}
+
+export function clearUserTasks(userId: number): number {
+  try {
+    const res = db.run("DELETE FROM tasks WHERE user_id = ?", [userId]);
+    return res.changes;
+  } catch (e) {
+    console.error("Error clearing user tasks:", e);
+    return 0;
+  }
+}
+
+export function deleteUserMessages(chatId: number, userId: number): number {
+  try {
+    const res = db.run("DELETE FROM messages WHERE chat_id = ? AND sender_id = ?", [chatId, userId]);
+    return res.changes;
+  } catch (e) {
+    console.error("Error deleting user messages in chat:", e);
+    return 0;
+  }
+}
+
+export function addNote(
+  userId: number,
+  content: string
+): { ok: boolean; error?: string; id?: number } {
+  const clean = String(content || "").trim();
+  if (!clean) {
+    return { ok: false, error: "متن یادداشت نمی‌تواند خالی باشد." };
+  }
+  if (clean.length > 500) {
+    return { ok: false, error: "طول هر یادداشت حداکثر می‌تواند ۵۰۰ کاراکتر باشد." };
+  }
+  try {
+    const countRow = db.query("SELECT COUNT(*) as cnt FROM notes WHERE user_id = ?").get(userId) as any;
+    if ((countRow?.cnt || 0) >= 50) {
+      return { ok: false, error: "حداکثر سقف مجاز ثبت یادداشت (۵۰ عدد) تکمیل شده است." };
+    }
+    const res = db.run("INSERT INTO notes (user_id, content) VALUES (?, ?)", [userId, clean]);
+    return { ok: true, id: Number(res.lastInsertRowid) };
+  } catch (e: any) {
+    return { ok: false, error: `خطا در ثبت یادداشت: ${e?.message || e}` };
+  }
+}
+
+export function getUserNotes(
+  userId: number
+): Array<{ id: number; content: string; created_at: string }> {
+  try {
+    return db
+      .query("SELECT id, content, created_at FROM notes WHERE user_id = ? ORDER BY id ASC")
+      .all(userId) as any[];
+  } catch (e) {
+    console.error("Error getting user notes:", e);
+    return [];
+  }
+}
+
+export function deleteUserNote(
+  userId: number,
+  noteIndexOrId: number
+): { ok: boolean; error?: string } {
+  try {
+    // 1. First try matching as direct note ID
+    const directRes = db.run("DELETE FROM notes WHERE id = ? AND user_id = ?", [noteIndexOrId, userId]);
+    if (directRes.changes > 0) {
+      return { ok: true };
+    }
+
+    // 2. Fall back to 1-based index from the user's notes list
+    const notes = getUserNotes(userId);
+    if (noteIndexOrId >= 1 && noteIndexOrId <= notes.length) {
+      const target = notes[noteIndexOrId - 1];
+      const indexRes = db.run("DELETE FROM notes WHERE id = ? AND user_id = ?", [target.id, userId]);
+      if (indexRes.changes > 0) {
+        return { ok: true };
+      }
+    }
+
+    return { ok: false, error: "یادداشتی با این شماره یا شناسه برای حساب شما یافت نشد." };
+  } catch (e: any) {
+    return { ok: false, error: `خطا در حذف یادداشت: ${e?.message || e}` };
+  }
+}
+
+export function clearUserNotes(userId: number): number {
+  try {
+    const res = db.run("DELETE FROM notes WHERE user_id = ?", [userId]);
+    return res.changes;
+  } catch (e) {
+    console.error("Error clearing user notes:", e);
+    return 0;
+  }
+}
+
+export function getApprovedUsersCount(): number {
+  try {
+    const row = db.query("SELECT COUNT(*) as cnt FROM users WHERE is_approved = 1").get() as any;
+    return row?.cnt || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function getApprovedUserIds(): number[] {
+  try {
+    const rows = db.query(
+      "SELECT user_id FROM users WHERE is_approved = 1 AND (is_banned = 0 OR is_banned IS NULL)"
+    ).all() as any[];
+    return rows.map((r) => Number(r.user_id));
+  } catch {
+    return [];
   }
 }
 

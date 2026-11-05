@@ -61,23 +61,60 @@ export async function handleStart(ctx: Context): Promise<void> {
 }
 
 export async function handleHelp(ctx: Context): Promise<void> {
-  const help = (
-    `📖 <b>راهنمای دستورات و کارکرد ربات mazmaz:</b>\n\n` +
+  const userId = ctx.from?.id || 0;
+  const isAdmin = CONFIG.ADMIN_IDS.includes(userId);
+
+  let help = (
+    `📖 <b>راهنمای کامل دستورات و قابلیت‌های ربات mazmaz:</b>\n\n` +
+    `🤖 <b>دستورات عمومی و روزمره:</b>\n` +
     `• <code>/start</code> - شروع گفتگو و نمایش منوی اصلی\n` +
-    `• <code>/clear</code> - پاکسازی حافظه و زمینه مکالمه (Reset Context)\n` +
-    `• <code>/history</code> - مشاهده لاگ پیام‌ها و دایجست چت\n` +
-    `• <code>/model</code> - مشاهده و انتخاب مدل هوش مصنوعی\n` +
-    `• <code>/temp</code> - تنظیم دمای خلاقیت پاسخ‌ها (Temperature)\n` +
-    `• <code>/lang</code> - تغییر زبان ربات (فارسی / انگلیسی)\n` +
-    `• <code>/system</code> - مشاهده پرامپت و قوانین حافظه زنده\n` +
-    `• <code>/settings</code> - داشبورد تنظیمات تعاملی\n` +
-    `• <code>/music [نام آهنگ یا لینک]</code> - جستجو، دانلود و دریافت مستقیم آهنگ\n` +
-    `• <code>/tasks</code> - مدیریت کارهای روزمره\n` +
-    `• <code>هواشناسی [اسم شهر]</code> - استعلام وضعیت زنده و پیش‌بینی آب و هوا\n` +
-    `• <code>دلار</code> یا <code>کریپتو</code> - قیمت لحظه‌ای بازار\n` +
-    `• ارسال هر لینک یا عکس - تحلیل محتوا با هوش مصنوعی\n\n` +
-    `💡 <i>توی گروه‌ها هم هر وقت بگی «مزمز» یا ریپلای کنی درجا جوابت رو میده!</i>`
+    `• <code>/help</code> - نمایش همین راهنما\n` +
+    `• <code>/dollar</code> یا <code>/gold</code> - قیمت لحظه‌ای دلار، طلا و سکه\n` +
+    `• <code>/crypto</code> - قیمت لحظه‌ای بازار ارزهای دیجیتال\n` +
+    `• <code>/weather [شهر]</code> - وضعیت زنده و پیش‌بینی آب و هوا\n` +
+    `• <code>/calc [عبارت]</code> - محاسبه عبارات ریاضی و مهندسی\n` +
+    `• <code>/music [نام آهنگ یا لینک]</code> - جستجو و دریافت مستقیم آهنگ\n` +
+    `• <code>/quota</code> - مشاهده سهمیه روزانه باقی‌مانده\n` +
+    `• <code>/whoami</code> - مشخصات حساب کاربری و شناسه شما\n` +
+    `• <code>/stop</code> - توقف فوری پاسخ و پردازش جاری\n` +
+    `• <code>/retry</code> - تلاش مجدد برای دریافت پاسخ آخرین پیام\n\n` +
+    `🧠 <b>ابزارهای هوش مصنوعی (AI Commands):</b>\n` +
+    `• <code>/summary</code> - خلاصه‌سازی پیام ریپلای‌شده یا گفتگوهای اخیر\n` +
+    `• <code>/translate [متن یا fa/en]</code> - ترجمه هوشمند بین فارسی و انگلیسی\n` +
+    `• <code>/explain</code> - توضیح ساده و روان پیام ریپلای‌شده\n` +
+    `• <code>/proofread</code> - ویرایش و اصلاح نگارشی و املایی متن\n` +
+    `• <code>/persona</code> - مشاهده لحن و شخصیت فعال بات\n` +
+    `• <code>/lang [fa|en]</code> - تغییر زبان کاری ربات\n\n` +
+    `📝 <b>یادداشت‌ها و ابزارهای کاربردی:</b>\n` +
+    `• <code>/remind [زمان] [متن]</code> - ثبت یادآور و کار روزمره\n` +
+    `• <code>/note [متن]</code> - ذخیره یادداشت شخصی (تا ۵۰ عدد)\n` +
+    `• <code>/notes</code> - مشاهده لیست یادداشت‌های ثبت‌شده\n` +
+    `• <code>/note_del [شماره]</code> - حذف یادداشت شخصی\n` +
+    `• <code>/tasks</code> - مدیریت لیست کارهای روزمره من\n` +
+    `• <code>/date [تاریخ]</code> - تبدیل و نمایش تقویم شمسی و میلادی\n` +
+    `• <code>/ping</code> - بررسی سرعت پاسخ‌دهی و مدل فعال\n` +
+    `• <code>/dice</code> ، <code>/coin</code> ، <code>/pick [a|b|c]</code> - ابزارهای تصادفی\n\n` +
+    `🔒 <b>حریم خصوصی و مدیریت داده‌ها:</b>\n` +
+    `• <code>/privacy</code> - سیاست شفاف حریم خصوصی و نگهداری داده‌ها\n` +
+    `• <code>/export</code> - دریافت فایل خروجی کامل از اطلاعات شما (فقط پیوی)\n` +
+    `• <code>/forget</code> - پاکسازی برگشت‌ناپذیر داده‌های شما با تایید\n` +
+    `• <code>/feedback [متن]</code> - ارسال مستقیم نظر یا گزارش به مدیریت\n` +
+    `• <code>/clear</code> - پاکسازی حافظه و زمینه مکالمه فعلی\n` +
+    `• <code>/history</code> - مشاهده تاریخچه و دایجست چت\n`
   );
+
+  if (isAdmin) {
+    help += (
+      `\n👑 <b>دستورات اختصاصی مدیریت (Owner):</b>\n` +
+      `• <code>/status</code> - وضعیت سرور، آپتایم، کول‌داون مدل‌ها و آمار کاربران\n` +
+      `• <code>/broadcast [متن]</code> - پیش‌نمایش و ارسال همگانی کنترل‌شده\n` +
+      `• <code>/admin</code> - پنل جامع مدیریت و تنظیمات پیشرفته\n` +
+      `• <code>/groups</code> - مدیریت گروه‌ها | <code>/logs</code> - لاگ‌های سیستم\n` +
+      `• <code>/model</code> ، <code>/power</code> ، <code>/temp</code> ، <code>/setkey</code> - تنظیمات موتور جمینای\n`
+    );
+  }
+
+  help += `\n💡 <i>در گروه‌ها با منشن کردن یا ریپلای به پیام مزمز می‌توانید صحبت کنید.</i>`;
   await ctx.reply(markdownToTelegramHtml(help), { parse_mode: "HTML" });
 }
 

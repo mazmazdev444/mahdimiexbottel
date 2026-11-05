@@ -294,36 +294,10 @@ export async function handleLogsCommand(ctx: Context): Promise<void> {
   await renderLogsOverview(ctx);
 }
 
+import { handleBroadcastCommand as handleBroadcastWithPreview } from "./userOwnerCommands";
+
 export async function handleBroadcastCommand(ctx: Context): Promise<void> {
-  if (!CONFIG.ADMIN_IDS.includes(ctx.from!.id)) {
-    await ctx.reply("⛔ شما دسترسی به این دستور را ندارید.");
-    return;
-  }
-
-  const text = ctx.message?.text?.replace(/^\/broadcast(@\w+)?\s*/i, "").trim();
-  if (!text) {
-    await ctx.reply("💡 لطفاً متن پیام همگانی را بعد از دستور وارد کنید:\n<code>/broadcast متن پیام</code>", {
-      parse_mode: "HTML",
-    });
-    return;
-  }
-
-  const userIds = getAllUserIds();
-  let sentCount = 0;
-  for (const uid of userIds) {
-    try {
-      await ctx.api.sendMessage(uid, `📢 <b>پیام همگانی از طرف مدیریت:</b>\n\n${text}`, {
-        parse_mode: "HTML",
-      });
-      sentCount++;
-    } catch {
-      // Ignore blocked or invalid
-    }
-  }
-
-  await ctx.reply(`✅ پیام همگانی با موفقیت برای <b>${sentCount}</b> کاربر ارسال شد!`, {
-    parse_mode: "HTML",
-  });
+  return handleBroadcastWithPreview(ctx);
 }
 
 export async function handleGrantCmdCommand(ctx: Context): Promise<void> {
