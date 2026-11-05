@@ -16,7 +16,7 @@
 [![Framework](https://img.shields.io/badge/Framework-grammY%20v1.34+-2ea44f?logo=telegram)](https://grammy.dev/)
 [![Database](https://img.shields.io/badge/Database-SQLite%20(bun:sqlite)-003B57?logo=sqlite)](https://bun.sh/docs/api/sqlite)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%20API-4285F4?logo=google)](https://ai.google.dev/)
-[![Tests](https://img.shields.io/badge/Tests-155+%20Passed-brightgreen)](https://bun.sh/docs/cli/test)
+[![Tests](https://img.shields.io/badge/Tests-265+%20Passed-brightgreen)](https://bun.sh/docs/cli/test)
 
 </div>
 
