@@ -735,6 +735,26 @@ Operational Rules:
 3. Media Delivery: Use inline links only: ![caption](url), [🎵 Title](url), [🎥 Title](url).
 4. Missing Context: If the user asks to analyze or translate an earlier message not in the immediate reply chain, instruct them to reply directly to that message and @mention the bot again.`;
 
+export const TELEGRAM_HTML_FORMATTING_DIRECTIVE = `[TELEGRAM FORMATTING DIRECTIVE: HTML PARSE MODE]
+Your output is sent with parse_mode=HTML. Use ONLY these tags:
+<b> <i> <u> <s> <tg-spoiler> <code> <pre> <pre><code class="language-x"> <a href="..."> <blockquote> <blockquote expandable>
+Never use markdown (no *, **, _, ~, backticks, # headers, [text](url)).
+Never use <br> <p> <div> <ul> <ol> <li> <h1>-<h6> <table> <span>. Line breaks are plain newlines.
+
+ESCAPING (mandatory): every literal "<", ">" and "&" that is not part of one of the tags above MUST be written as &lt; &gt; &amp;. This also applies inside <pre> and <code> (e.g. Array<string>, a && b).
+Close every tag you open. Do not put tags inside <pre> or <code> except the single <code class="language-x"> inside <pre>.
+
+Usage:
+1. Short answers: plain text, no blockquote.
+2. Long text, logs, or multi-paragraph analysis (roughly more than 15 lines): wrap plain text in <blockquote expandable>...</blockquote>. Do not put <pre> or code inside a blockquote.
+3. Code: <pre><code class="language-typescript">...</code></pre> (escaped as above).
+4. Tables: use <pre> with aligned monospace columns for English/numeric data. For Persian text, use a simple list instead of a table.
+5. Section header: <b>1. Title</b> then a new line with <i>subtitle</i>.
+6. Inline code/identifiers: <code>name</code>. Links: <a href="https://example.com">text</a>.
+7. <tg-spoiler> only when the user asks for hidden/spoiler text.
+8. Nested blockquotes only when the user explicitly asks for them (up to 3 levels).
+Keep each message under 4096 characters; if longer, split at paragraph boundaries and never inside a tag.`;
+
 async function askGeminiInternal(
   userId: number,
   prompt: string,
@@ -854,10 +874,12 @@ async function askGeminiInternal(
 - برای معرفی پروژه‌ها مستقیماً سراغ ریپازیتوری‌های معتبر، ستاره‌دار و فعال گیت‌هاب برو.
 - ساختار معرفی: [نام ابزار](لینک) | کاربرد فنی در یک خط | نکته طلایی پیاده‌سازی. مفاهیم را با مثال کدی ملموس جا بینداز.
 
-### فرمت نگارش مدرن تلگرام:
-- بین پاراگراف‌ها خط خالی بگذار. از بولد و ایموجی برای تیترها، لیست برای مراحل، \`> \` برای نقل‌قول و \`||...||\` برای اسپویلر استفاده کن.
-- برای نقل‌قول‌ها و بخش‌های طولانی باجزئیات از خطوط مارک‌داون «> » استفاده کن؛ ربات آنها را خودکار تبدیل می‌کند (هرگز تگ‌های HTML ننویس).
-- **قانون طلایی کپی نیتیو تلگرام:** فقط و فقط برای کد واقعی، دستورات ترمینال، پرامپت یا متنی که صراحتاً درخواست کپی شده از بلوک کد چندخطی زبان‌دار (\`\`\`bash، \`\`\`ts، \`\`\`python، \`\`\`text) استفاده کن تا تلگرام هدر کپی نیتیو را نشان دهد. هرگز جملات عادی مکالمه را داخل بلوک کد نگذار. تمام نشانه‌ها (** و \`) را کامل ببند.
+### فرمت نگارش مدرن تلگرام (Telegram HTML Formatting):
+- خروجی پیام‌ها مستقیماً با parse_mode=HTML فرستاده می‌شود؛ دستورالعمل جامع [TELEGRAM FORMATTING DIRECTIVE: HTML PARSE MODE] را مو‌به‌مو اجرا کن.
+- فقط از تگ‌های مجاز تلگرام (<b>, <i>, <u>, <s>, <tg-spoiler>, <code>, <pre>, <pre><code class="language-x">, <a href="...">, <blockquote>, <blockquote expandable>) استفاده کن و هرگز مارک‌داون خام ننویس.
+- اسکیپ اجباری: تمام کاراکترهای literal "<", ">" و "&" را حتماً به صورت &lt; &gt; &amp; بنویس.
+- پاسخ‌های طولانی، لاگ‌ها یا تحلیل چندپاراگرافی (بیش از ۱۵ خط) را داخل <blockquote expandable>...</blockquote> قرار بده. هرگز <pre> را داخل blockquote نگذار.
+- کدها منحصراً با <pre><code class="language-x">...</code></pre> و اسکیپ کامل ارسال شوند تا هدر کپی نیتیو تلگرام فعال باشد.
 
 ### قوانین نمایش فرمول‌های ریاضی و علائم (Telegram-Safe Math & Code Formatting):
 1. **عدم استفاده از LaTeX خام ($$ یا $):** تلگرام تگ‌های LaTeX را رندر نمی‌کند. هرگز از $$ یا $ برای فرمول‌ها استفاده نکن، زیرا تلگرام آن‌ها را به شکل کدهای خام و به‌هم‌ریخته نمایش می‌دهد.
@@ -907,9 +929,11 @@ async function askGeminiInternal(
 - In group chats, always address and reply ONLY to the current sender indicated in [Current Sender]. Never confuse group members with each other or assume one user's identity based on another member's past messages.
 - Always address users by their natural display name ({displayName}), NOT by their raw numeric user ID or @username handle, unless explicitly asked.
 
-### نگارش تلگرام و ابزارها:
-- پروژه‌ها را با لینک مستقیم معتبر معرفی کن. فرمت مرتب با فاصله‌گذاری مناسب داشته باش.
-- **کپی نیتیو تلگرام:** فقط برای کد، کانفیگ، دستورات یا متنی که کاربر صراحتاً درخواست کپی دارد از کدباکس زبان‌دار (\`\`\`bash، \`\`\`ts، \`\`\`text) استفاده کن.
+### نگارش تلگرام و ابزارها (Telegram HTML Formatting):
+- خروجی پیام‌ها مستقیماً با parse_mode=HTML فرستاده می‌شود و رعایت دستورالعمل [TELEGRAM FORMATTING DIRECTIVE: HTML PARSE MODE] الزامی است.
+- فقط از تگ‌های مجاز <b>, <i>, <u>, <s>, <tg-spoiler>, <code>, <pre>, <pre><code class="language-x">, <a href="...">, <blockquote>, <blockquote expandable> استفاده کن و هرگز مارک‌داون خام ننویس.
+- تمام کاراکترهای ویژه (<, >, &) را اسکیپ کن (&lt; &gt; &amp;). تحلیل‌های طولانی یا لاگ‌ها را در <blockquote expandable>...</blockquote> و کدها را در <pre><code class="language-x">...</code></pre> بگذار.
+- پروژه‌ها را با تگ لینک معتبر معرفی کن. فرمت مرتب با فاصله‌گذاری مناسب داشته باش.
 - برای آب‌وهوا از get_weather، برای وب و اخبار از web_search، برای لینک‌های ارسالی از read_web_link، برای اسکرین‌شات از take_web_screenshot، برای ریاضی از eval_math، برای موزیک از download_music، برای پیشنهاد تغییر رفتار از propose_memory_rule و برای خلاصه چت از generate_chat_digest استفاده کن.
 - پاسخ‌ها خلاصه، دقیق، بدون کش‌آمدن و بدون اتلاف توکن باشد.
 
@@ -957,8 +981,8 @@ async function askGeminiInternal(
     const strictSearchDirective = "قوانین استخراج زنده اطلاعات فنی (Real-time Technical Intelligence): پاسخ به سوالات درباره آخرین اخبار، نسخه‌های جدید نرم‌افزار، مدل‌های هوش مصنوعی، کتابخانه‌ها و قیمت‌ها از حافظه داخلی اکیداً ممنوع است. قبل از پاسخ، اجرای ابزار web_search الزامی است (No Pre-Search Denial). هرگز شماره نسخه‌های درخواستی را دانگرید یا عوض نکن (Exact Version Fidelity) و در صورت نبود نتیجه معتبر، صراحتاً بگو نتیجه‌ای یافت نشد و هرگز اطلاعات جعلی نساز (Zero Results Policy).";
 
     systemInstruction = isGuest
-      ? `${GUEST_MODE_SYSTEM_INSTRUCTION}\n\n${strictSearchDirective}\n\n[Current Date: ${currentDate}]`
-      : `${strictSearchDirective}\n\n[Current Date: ${currentDate}]\n\n${systemInstruction}\n\n${GROUP_SPEAKER_INVARIANTS_PROMPT}`;
+      ? `${GUEST_MODE_SYSTEM_INSTRUCTION}\n\n${TELEGRAM_HTML_FORMATTING_DIRECTIVE}\n\n${strictSearchDirective}\n\n[Current Date: ${currentDate}]`
+      : `${strictSearchDirective}\n\n${TELEGRAM_HTML_FORMATTING_DIRECTIVE}\n\n[Current Date: ${currentDate}]\n\n${systemInstruction}\n\n${GROUP_SPEAKER_INVARIANTS_PROMPT}`;
 
     const functionDeclarations: any[] = [
       {

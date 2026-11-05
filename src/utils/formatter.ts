@@ -200,7 +200,7 @@ export function markdownToTelegramHtml(markdown: string): string {
 
   // 2.4 Extract and preserve already-existing valid Telegram HTML tags
   const htmlTags: string[] = [];
-  const TELEGRAM_HTML_TAG_REGEX = /<\/?(?:b|strong|i|em|u|ins|s|strike|del|tg-spoiler|code|pre)(?:\s+[^>]*)?>|<a\s+(?:[^>]*?\s+)?href="[^"]*"(?:\s+[^>]*)?>|<\/a>|<tg-emoji\s+(?:[^>]*?\s+)?(?:emoji-id|id)="[^"]*"(?:\s+[^>]*)?>|<\/tg-emoji>/gi;
+  const TELEGRAM_HTML_TAG_REGEX = /<\/?(?:b|strong|i|em|u|ins|s|strike|del|tg-spoiler|code|pre|blockquote)(?:\s+[^>]*)?>|<a\s+(?:[^>]*?\s+)?href="[^"]*"(?:\s+[^>]*)?>|<\/a>|<tg-emoji\s+(?:[^>]*?\s+)?(?:emoji-id|id)="[^"]*"(?:\s+[^>]*)?>|<\/tg-emoji>/gi;
   formatted = formatted.replace(TELEGRAM_HTML_TAG_REGEX, (tag) => {
     const index = htmlTags.length;
     htmlTags.push(tag);

@@ -8,6 +8,7 @@ import {
   getThinkingBudget,
   getActivePowerLevel,
   isSearchIntentQuery,
+  TELEGRAM_HTML_FORMATTING_DIRECTIVE,
 } from "../src/services/ai";
 import { purifySearchQuery } from "../src/services/webSearch";
 import { matchModelName } from "../src/index";
@@ -433,6 +434,19 @@ describe("ai service helpers", () => {
     it("should handle animation without caption", () => {
       expect(buildAnimationPrompt("")).toBe("[User sent a GIF animation. Caption: ]");
       expect(buildAnimationPrompt(undefined)).toBe("[User sent a GIF animation. Caption: ]");
+    });
+  });
+
+  describe("TELEGRAM_HTML_FORMATTING_DIRECTIVE", () => {
+    it("should export directive enforcing strict HTML parse mode and allowed Telegram tags", () => {
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toBeDefined();
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("[TELEGRAM FORMATTING DIRECTIVE: HTML PARSE MODE]");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("Your output is sent with parse_mode=HTML. Use ONLY these tags:");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("<b> <i> <u> <s> <tg-spoiler> <code> <pre> <pre><code class=\"language-x\"> <a href=\"...\"> <blockquote> <blockquote expandable>");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("Never use markdown (no *, **, _, ~, backticks, # headers, [text](url)).");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("ESCAPING (mandatory): every literal \"<\", \">\" and \"&\" that is not part of one of the tags above MUST be written as &lt; &gt; &amp;");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("<blockquote expandable>...</blockquote>");
+      expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("<pre><code class=\"language-typescript\">...</code></pre>");
     });
   });
 });

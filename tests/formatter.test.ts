@@ -232,12 +232,11 @@ describe("formatter utils", () => {
         expect(html).not.toMatch(/<pre[^>]*>(?:(?!<\/pre>)[\s\S])*<blockquote/);
       });
 
-      it("still escapes raw <blockquote> written directly by model", () => {
-        const md = "Here is raw HTML: <blockquote>text</blockquote> and <blockquote expandable>more</blockquote>";
+      it("preserves valid <blockquote> and <blockquote expandable> written directly by model", () => {
+        const md = "Here is valid HTML: <blockquote>text</blockquote> and <blockquote expandable>more</blockquote>";
         const html = markdownToTelegramHtml(md);
-        expect(html).toContain("&lt;blockquote&gt;text&lt;/blockquote&gt;");
-        expect(html).toContain("&lt;blockquote expandable&gt;more&lt;/blockquote&gt;");
-        expect(html).not.toContain("<blockquote>text</blockquote>");
+        expect(html).toContain("<blockquote>text</blockquote>");
+        expect(html).toContain("<blockquote expandable>more</blockquote>");
       });
     });
   });
