@@ -14,10 +14,22 @@ import {
 } from "../src/services/resilience";
 import {
   markModelCooldown,
+  resetModelCooldown,
   isModelInCooldown,
   modelCooldowns,
   getModelCandidateChain,
   pruneMultimodalHistory,
+  setAiClientFactory,
+  resetAiClientFactory,
+  setGeminiModelTimeoutMs,
+  resetGeminiModelTimeoutMs,
+  setGeminiMessageBudgetMs,
+  resetGeminiMessageBudgetMs,
+  GEMINI_MODEL_TIMEOUT_MS,
+  INITIAL_COOLDOWN_MS,
+  MAX_COOLDOWN_MS,
+  BUDGET_EXCEEDED_MESSAGE,
+  askGemini,
 } from "../src/services/ai";
 import { setSetting, getSetting } from "../src/db";
 
@@ -220,28 +232,251 @@ describe("resilience service", () => {
     });
   });
 
-  describe("Dynamic Model Cooldowns (25s on 503 vs 300s on 429)", () => {
-    it("should set 25s cooldown for HTTP 503 transient spikes", () => {
-      const model = "gemini-test-503-spike";
+  describe("Gemini Model Fallback & Cooldown Resilience (Fakes / No Network)", () => {
+    it("503 skips to next model without retry", async () => {
+      modelCooldowns.clear();
+      setSetting("ai_model", "");
+      const callCounts: Record<string, number> = {};
+
+      setAiClientFactory((_key: string) => ({
+        models: {
+          generateContent: async (params: any) => {
+            const m = params.model;
+            callCounts[m] = (callCounts[m] || 0) + 1;
+            if (m === "gemini-3.8-flash") {
+              const err: any = new Error("503 Service Unavailable");
+              err.status = 503;
+              throw err;
+            }
+            return {
+              text: "Response from fallback model",
+              candidates: [
+                {
+                  content: {
+                    role: "model",
+                    parts: [{ text: "Response from fallback model" }],
+                  },
+                },
+              ],
+              functionCalls: [],
+            };
+          },
+        },
+      }));
+
+      try {
+        const reply = await askGemini(99999999, "سلام تست", undefined, { isGuest: true, from: { id: 99999999 } });
+        expect(reply).toBe("Response from fallback model");
+        // Verify NO same-model retry for 503: gemini-3.8-flash called exactly once
+        expect(callCounts["gemini-3.8-flash"]).toBe(1);
+        expect(callCounts["gemini-3.7-flash"]).toBe(1);
+        // Verify failing model is put in cooldown
+        expect(isModelInCooldown("gemini-3.8-flash")).toBe(true);
+      } finally {
+        resetAiClientFactory();
+        modelCooldowns.clear();
+      }
+    });
+
+    it("timeout switches candidate within the new limit", async () => {
+      modelCooldowns.clear();
+      setSetting("ai_model", "");
+      setGeminiModelTimeoutMs(150); // Test with fast timeout
+      const callCounts: Record<string, number> = {};
+
+      setAiClientFactory((_key: string) => ({
+        models: {
+          generateContent: async (params: any) => {
+            const m = params.model;
+            callCounts[m] = (callCounts[m] || 0) + 1;
+            if (m === "gemini-3.8-flash") {
+              // Simulate hung request that times out
+              return new Promise(() => {});
+            }
+            return {
+              text: "Recovered after timeout",
+              candidates: [
+                {
+                  content: {
+                    role: "model",
+                    parts: [{ text: "Recovered after timeout" }],
+                  },
+                },
+              ],
+              functionCalls: [],
+            };
+          },
+        },
+      }));
+
+      const startTime = Date.now();
+      try {
+        const reply = await askGemini(99999999, "تست تایم‌اوت", undefined, { isGuest: true, from: { id: 99999999 } });
+        const elapsed = Date.now() - startTime;
+        expect(reply).toBe("Recovered after timeout");
+        expect(callCounts["gemini-3.8-flash"]).toBe(1);
+        expect(callCounts["gemini-3.7-flash"]).toBe(1);
+        expect(elapsed).toBeGreaterThanOrEqual(140);
+        expect(elapsed).toBeLessThan(3000); // Switched candidate within limit, well below 30s
+        expect(isModelInCooldown("gemini-3.8-flash")).toBe(true);
+      } finally {
+        resetAiClientFactory();
+        resetGeminiModelTimeoutMs();
+        modelCooldowns.clear();
+      }
+    });
+
+    it("underlying request is cancelled with AbortSignal on timeout", async () => {
+      modelCooldowns.clear();
+      setSetting("ai_model", "");
+      setGeminiModelTimeoutMs(80); // Fast timeout for testing
+
+      let passedSignal: AbortSignal | undefined;
+      let abortedWhenObserved = false;
+
+      setAiClientFactory((_key: string) => ({
+        models: {
+          generateContent: async (params: any) => {
+            const m = params.model;
+            if (m === "gemini-3.8-flash") {
+              passedSignal = params?.config?.abortSignal;
+              return new Promise((resolve, reject) => {
+                if (passedSignal) {
+                  passedSignal.addEventListener("abort", () => {
+                    abortedWhenObserved = true;
+                    const err: any = new Error("Request aborted");
+                    err.name = "AbortError";
+                    reject(err);
+                  });
+                }
+              });
+            }
+            return {
+              text: "Success from fallback model",
+              candidates: [
+                {
+                  content: {
+                    role: "model",
+                    parts: [{ text: "Success from fallback model" }],
+                  },
+                },
+              ],
+              functionCalls: [],
+            };
+          },
+        },
+      }));
+
+      try {
+        const reply = await askGemini(99999999, "تست کنسل شدن سیگنال", undefined, { isGuest: true, from: { id: 99999999 } });
+        expect(reply).toBe("Success from fallback model");
+        expect(passedSignal).toBeDefined();
+        expect(passedSignal!.aborted).toBe(true);
+        expect(abortedWhenObserved).toBe(true);
+      } finally {
+        resetAiClientFactory();
+        resetGeminiModelTimeoutMs();
+        modelCooldowns.clear();
+      }
+    });
+
+    it("total budget across candidates returns Persian try again line when exceeded", async () => {
+      modelCooldowns.clear();
+      setSetting("ai_model", "");
+      setGeminiModelTimeoutMs(70);
+      setGeminiMessageBudgetMs(150); // Tight 150ms message budget
+
+      setAiClientFactory((_key: string) => ({
+        models: {
+          generateContent: async () => {
+            // Every candidate hangs until timed out
+            return new Promise(() => {});
+          },
+        },
+      }));
+
+      const startTime = Date.now();
+      try {
+        const reply = await askGemini(99999999, "تست بودجه کل پیام", undefined, { isGuest: true, from: { id: 99999999 } });
+        const elapsed = Date.now() - startTime;
+        expect(reply).toBe(BUDGET_EXCEEDED_MESSAGE);
+        expect(reply).toBe("زمان پاسخ‌گویی طولانی شد، لطفاً دوباره تلاش کنید ⏳");
+        expect(elapsed).toBeGreaterThanOrEqual(130);
+        expect(elapsed).toBeLessThan(1500); // Exited early via total budget
+      } finally {
+        resetAiClientFactory();
+        resetGeminiModelTimeoutMs();
+        resetGeminiMessageBudgetMs();
+        modelCooldowns.clear();
+      }
+    });
+
+    it("cooldown starts at 5m, doubles on consecutive failures up to 30m, and resets on success", () => {
+      const model = "gemini-exp-cooldown-test";
+      modelCooldowns.delete(model);
+
+      // Failure 1: 5 minutes (300,000ms)
       markModelCooldown(model, 503);
-      const entry = modelCooldowns.get(model);
+      let entry = modelCooldowns.get(model)!;
       expect(entry).toBeDefined();
-      const diff = entry!.expiresAt - Date.now();
-      expect(diff).toBeLessThanOrEqual(25000);
-      expect(diff).toBeGreaterThan(24000);
+      expect(entry.consecutiveFailures).toBe(1);
+      expect(entry.durationMs).toBe(INITIAL_COOLDOWN_MS); // 300,000 ms
       expect(isModelInCooldown(model)).toBe(true);
+
+      // Failure 2: 10 minutes (600,000ms)
+      markModelCooldown(model, 503);
+      entry = modelCooldowns.get(model)!;
+      expect(entry.consecutiveFailures).toBe(2);
+      expect(entry.durationMs).toBe(600000);
+
+      // Failure 3: 20 minutes (1,200,000ms)
+      markModelCooldown(model, 503);
+      entry = modelCooldowns.get(model)!;
+      expect(entry.consecutiveFailures).toBe(3);
+      expect(entry.durationMs).toBe(1200000);
+
+      // Failure 4: doubles to 40m but capped at 30 minutes (1,800,000ms)
+      markModelCooldown(model, 503);
+      entry = modelCooldowns.get(model)!;
+      expect(entry.consecutiveFailures).toBe(4);
+      expect(entry.durationMs).toBe(MAX_COOLDOWN_MS); // 1,800,000 ms
+
+      // Failure 5: remains capped at 30 minutes
+      markModelCooldown(model, 503);
+      entry = modelCooldowns.get(model)!;
+      expect(entry.consecutiveFailures).toBe(5);
+      expect(entry.durationMs).toBe(MAX_COOLDOWN_MS);
+
+      // Success: resets cooldown and consecutive failures
+      resetModelCooldown(model);
+      expect(modelCooldowns.has(model)).toBe(false);
+      expect(isModelInCooldown(model)).toBe(false);
+
+      // Subsequent failure starts fresh at 5 minutes
+      markModelCooldown(model, 503);
+      entry = modelCooldowns.get(model)!;
+      expect(entry.consecutiveFailures).toBe(1);
+      expect(entry.durationMs).toBe(INITIAL_COOLDOWN_MS);
       modelCooldowns.delete(model);
     });
 
-    it("should support explicit 25,000ms (25s) duration for 503", () => {
-      const model = "gemini-test-25s-explicit";
-      markModelCooldown(model, 25000);
-      const entry = modelCooldowns.get(model);
-      expect(entry).toBeDefined();
-      const diff = entry!.expiresAt - Date.now();
-      expect(diff).toBeLessThanOrEqual(25000);
-      expect(diff).toBeGreaterThan(24000);
-      modelCooldowns.delete(model);
+    it("models in active cooldown are excluded from candidates", () => {
+      setSetting("ai_model", "");
+      modelCooldowns.clear();
+
+      const initialChain = getModelCandidateChain();
+      expect(initialChain[0]).toBe("gemini-3.8-flash");
+
+      // Enter cooldown on primary model
+      markModelCooldown("gemini-3.8-flash", 503);
+      const chainAfterCooldown = getModelCandidateChain();
+      expect(chainAfterCooldown).not.toContain("gemini-3.8-flash");
+      expect(chainAfterCooldown[0]).toBe("gemini-3.7-flash");
+
+      // When cooldown is cleared, candidate is restored
+      resetModelCooldown("gemini-3.8-flash");
+      const chainAfterReset = getModelCandidateChain();
+      expect(chainAfterReset[0]).toBe("gemini-3.8-flash");
     });
 
     it("should retain strict 300s (5-minute) cooldown for HTTP 429 quota exhaustion", () => {
@@ -249,19 +484,8 @@ describe("resilience service", () => {
       markModelCooldown(model, 429);
       const entry = modelCooldowns.get(model);
       expect(entry).toBeDefined();
-      const diff = entry!.expiresAt - Date.now();
-      expect(diff).toBeLessThanOrEqual(300000);
-      expect(diff).toBeGreaterThan(295000);
+      expect(entry!.durationMs).toBe(300000);
       expect(isModelInCooldown(model)).toBe(true);
-      modelCooldowns.delete(model);
-    });
-
-    it("should default to 300,000ms when no status or duration is specified", () => {
-      const model = "test-model-default-cooldown";
-      markModelCooldown(model);
-      const entry = modelCooldowns.get(model);
-      expect(entry).toBeDefined();
-      expect(entry!.expiresAt - Date.now()).toBeGreaterThan(295000);
       modelCooldowns.delete(model);
     });
   });

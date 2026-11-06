@@ -123,29 +123,106 @@ export function getResolvedActiveModel(): ModelResolution {
   return { model: safeDefault, source: "default" };
 }
 
-export const modelCooldowns = new Map<string, { expiresAt: number; logged: boolean }>();
+export let GEMINI_MODEL_TIMEOUT_MS = CONFIG.GEMINI_TIMEOUT_MS || 10000;
 
-export function markModelCooldown(modelName: string, durationMsOrStatus: number = 300000): void {
-  const durationMs =
-    durationMsOrStatus === 503
-      ? 25000
-      : durationMsOrStatus === 429
-      ? 300000
-      : durationMsOrStatus;
+export function setGeminiModelTimeoutMs(ms: number): void {
+  GEMINI_MODEL_TIMEOUT_MS = ms;
+}
+
+export function resetGeminiModelTimeoutMs(): void {
+  GEMINI_MODEL_TIMEOUT_MS = CONFIG.GEMINI_TIMEOUT_MS || 10000;
+}
+
+export let GEMINI_MESSAGE_BUDGET_MS = CONFIG.GEMINI_MESSAGE_BUDGET_MS || 25000;
+export const BUDGET_EXCEEDED_MESSAGE = "زمان پاسخ‌گویی طولانی شد، لطفاً دوباره تلاش کنید ⏳";
+
+export function setGeminiMessageBudgetMs(ms: number): void {
+  GEMINI_MESSAGE_BUDGET_MS = ms;
+}
+
+export function resetGeminiMessageBudgetMs(): void {
+  GEMINI_MESSAGE_BUDGET_MS = CONFIG.GEMINI_MESSAGE_BUDGET_MS || 25000;
+}
+
+export const INITIAL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes = 300,000 ms
+export const MAX_COOLDOWN_MS = 30 * 60 * 1000;    // 30 minutes = 1,800,000 ms
+
+export interface ModelCooldownInfo {
+  expiresAt: number;
+  consecutiveFailures: number;
+  durationMs: number;
+  logged: boolean;
+}
+
+export const modelCooldowns = new Map<string, ModelCooldownInfo>();
+
+export function markModelCooldown(modelName: string, durationMsOrStatus?: number): void {
+  const prev = modelCooldowns.get(modelName);
+  const consecutiveFailures = (prev?.consecutiveFailures || 0) + 1;
+
+  let durationMs: number;
+  if (
+    durationMsOrStatus !== undefined &&
+    durationMsOrStatus !== 503 &&
+    durationMsOrStatus !== 504 &&
+    durationMsOrStatus !== 500 &&
+    durationMsOrStatus !== 429 &&
+    durationMsOrStatus !== 300000
+  ) {
+    durationMs = durationMsOrStatus;
+  } else {
+    // Start at 5 minutes, double on consecutive failures up to 30 minutes
+    durationMs = Math.min(
+      MAX_COOLDOWN_MS,
+      INITIAL_COOLDOWN_MS * Math.pow(2, consecutiveFailures - 1)
+    );
+  }
+
   modelCooldowns.set(modelName, {
     expiresAt: Date.now() + durationMs,
+    consecutiveFailures,
+    durationMs,
     logged: false,
   });
+}
+
+export function resetModelCooldown(modelName: string): void {
+  modelCooldowns.delete(modelName);
 }
 
 export function isModelInCooldown(modelName: string): boolean {
   const cd = modelCooldowns.get(modelName);
   if (!cd) return false;
   if (Date.now() >= cd.expiresAt) {
-    modelCooldowns.delete(modelName);
     return false;
   }
   return true;
+}
+
+export let aiClientFactory = (key: string) =>
+  new GoogleGenAI({
+    apiKey: key,
+    // @ts-ignore
+    httpOptions: {
+      ...(agent ? { agent } : {}),
+      retryOptions: { attempts: 1 },
+    },
+  });
+
+export function setAiClientFactory(fn: (key: string) => any): void {
+  aiClientFactory = fn;
+}
+
+export function resetAiClientFactory(): void {
+  aiClientFactory = (key: string) =>
+    new GoogleGenAI({
+      apiKey: key,
+      // @ts-ignore
+      httpOptions: {
+        ...(agent ? { agent } : {}),
+        retryOptions: { attempts: 1 },
+      },
+    });
 }
 
 export function getModelCandidateChain(): string[] {
@@ -197,16 +274,13 @@ export function getModelCandidateChain(): string[] {
 
   const now = Date.now();
   const available: string[] = [];
-  const cooling: Array<{ model: string; expiresAt: number; cd: { expiresAt: number; logged: boolean } }> = [];
+  const cooling: Array<{ model: string; expiresAt: number; cd: ModelCooldownInfo }> = [];
 
   for (const m of candidatePool) {
     const cd = modelCooldowns.get(m);
     if (cd && now < cd.expiresAt) {
       cooling.push({ model: m, expiresAt: cd.expiresAt, cd });
     } else {
-      if (cd && now >= cd.expiresAt) {
-        modelCooldowns.delete(m);
-      }
       available.push(m);
     }
   }
@@ -245,7 +319,10 @@ export async function checkAvailableGeminiModels(apiKey: string): Promise<void> 
     const checkAi = new GoogleGenAI({
       apiKey: cleanKey,
       // @ts-ignore
-      httpOptions: agent ? { agent } : undefined,
+      httpOptions: {
+        ...(agent ? { agent } : {}),
+        retryOptions: { attempts: 1 },
+      },
     });
     const pager = await checkAi.models.list();
     const liveNames: string[] = [];
@@ -281,7 +358,10 @@ export async function testGeminiKey(apiKey: string): Promise<{ ok: boolean; mess
   const testAi = new GoogleGenAI({
     apiKey: cleanKey,
     // @ts-ignore
-    httpOptions: agent ? { agent } : undefined,
+    httpOptions: {
+      ...(agent ? { agent } : {}),
+      retryOptions: { attempts: 1 },
+    },
   });
 
   const testModels = getModelCandidateChain();
@@ -443,7 +523,7 @@ async function callGenerateContentWithAbort(
   aiClient: any,
   params: any,
   sig?: AbortSignal,
-  timeoutMs = 30000
+  timeoutMs = GEMINI_MODEL_TIMEOUT_MS
 ): Promise<any> {
   if (sig?.aborted) {
     const err: any = new Error("Request aborted");
@@ -451,51 +531,77 @@ async function callGenerateContentWithAbort(
     throw err;
   }
 
-  const callConfig = {
-    ...params.config,
-    ...(sig ? { abortSignal: sig } : {}),
+  const attemptController = new AbortController();
+  let timedOut = false;
+
+  const onSigAbort = () => {
+    try {
+      attemptController.abort(sig?.reason || new Error("Request aborted"));
+    } catch {}
   };
-
-  const callPromise = aiClient.models.generateContent({
-    ...params,
-    config: callConfig,
-  });
-
-  let timeoutTimer: any;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutTimer = setTimeout(() => {
-      const err: any = new Error(`Request timed out after ${timeoutMs}ms`);
-      err.name = "TimeoutError";
-      reject(err);
-    }, timeoutMs);
-  });
-
-  const promises: Promise<any>[] = [callPromise, timeoutPromise];
-
-  let abortHandler: (() => void) | undefined;
   if (sig) {
-    promises.push(
-      new Promise((_, reject) => {
-        abortHandler = () => {
-          const err: any = new Error("Request aborted");
-          err.name = "AbortError";
-          reject(err);
-        };
-        if (sig.aborted) {
-          abortHandler();
-        } else {
-          sig.addEventListener("abort", abortHandler, { once: true });
-        }
-      })
-    );
+    if (sig.aborted) {
+      onSigAbort();
+    } else {
+      sig.addEventListener("abort", onSigAbort, { once: true });
+    }
   }
 
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    const err: any = new Error(`Request timed out after ${timeoutMs}ms`);
+    err.name = "TimeoutError";
+    try {
+      attemptController.abort(err);
+    } catch {}
+  }, timeoutMs);
+
+  const callConfig = {
+    ...params?.config,
+    abortSignal: attemptController.signal,
+  };
+
   try {
-    return await Promise.race(promises);
+    const callPromise = aiClient.models.generateContent({
+      ...params,
+      config: callConfig,
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      attemptController.signal.addEventListener(
+        "abort",
+        () => {
+          if (timedOut) {
+            const err: any = new Error(`Request timed out after ${timeoutMs}ms`);
+            err.name = "TimeoutError";
+            reject(err);
+          } else {
+            const err: any = new Error("Request aborted");
+            err.name = "AbortError";
+            reject(err);
+          }
+        },
+        { once: true }
+      );
+    });
+
+    return await Promise.race([callPromise, timeoutPromise]);
+  } catch (err: any) {
+    if (timedOut || err?.name === "TimeoutError") {
+      const timeoutErr: any = new Error(`Request timed out after ${timeoutMs}ms`);
+      timeoutErr.name = "TimeoutError";
+      throw timeoutErr;
+    }
+    if (sig?.aborted || err?.name === "AbortError") {
+      const abortErr: any = new Error("Request aborted");
+      abortErr.name = "AbortError";
+      throw abortErr;
+    }
+    throw err;
   } finally {
     clearTimeout(timeoutTimer);
-    if (sig && abortHandler) {
-      sig.removeEventListener("abort", abortHandler);
+    if (sig) {
+      sig.removeEventListener("abort", onSigAbort);
     }
   }
 }
@@ -504,7 +610,7 @@ async function callGenerateContentStreamWithAbort(
   aiClient: any,
   params: any,
   sig?: AbortSignal,
-  timeoutMs = 30000,
+  timeoutMs = GEMINI_MODEL_TIMEOUT_MS,
   onChunk?: (chunk: string, accumulated: string) => void
 ): Promise<{ response: any; receivedAnyChunk: boolean; accumulatedText: string }> {
   if (sig?.aborted) {
@@ -513,9 +619,34 @@ async function callGenerateContentStreamWithAbort(
     throw err;
   }
 
+  const attemptController = new AbortController();
+  let timedOut = false;
+
+  const onSigAbort = () => {
+    try {
+      attemptController.abort(sig?.reason || new Error("Request aborted"));
+    } catch {}
+  };
+  if (sig) {
+    if (sig.aborted) {
+      onSigAbort();
+    } else {
+      sig.addEventListener("abort", onSigAbort, { once: true });
+    }
+  }
+
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
+    err.name = "TimeoutError";
+    try {
+      attemptController.abort(err);
+    } catch {}
+  }, timeoutMs);
+
   const callConfig = {
-    ...params.config,
-    ...(sig ? { abortSignal: sig } : {}),
+    ...params?.config,
+    abortSignal: attemptController.signal,
   };
 
   let receivedAnyChunk = false;
@@ -528,6 +659,8 @@ async function callGenerateContentStreamWithAbort(
   let streamPromise: Promise<any>;
   try {
     if (typeof aiClient?.models?.generateContentStream !== "function") {
+      clearTimeout(timeoutTimer);
+      if (sig) sig.removeEventListener("abort", onSigAbort);
       return {
         response: null,
         receivedAnyChunk: false,
@@ -538,22 +671,28 @@ async function callGenerateContentStreamWithAbort(
       ...params,
       config: callConfig,
     });
-  } catch {
-    return {
-      response: null,
-      receivedAnyChunk: false,
-      accumulatedText: "",
-    };
+  } catch (err: any) {
+    clearTimeout(timeoutTimer);
+    if (sig) sig.removeEventListener("abort", onSigAbort);
+    throw err;
   }
 
-  // TTFT (Time-to-First-Token) 30s timeout timer
-  let timeoutTimer: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutTimer = setTimeout(() => {
-      const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
-      err.name = "TimeoutError";
-      reject(err);
-    }, timeoutMs);
+    attemptController.signal.addEventListener(
+      "abort",
+      () => {
+        if (timedOut) {
+          const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
+          err.name = "TimeoutError";
+          reject(err);
+        } else {
+          const err: any = new Error("Request aborted");
+          err.name = "AbortError";
+          reject(err);
+        }
+      },
+      { once: true }
+    );
   });
 
   let stream: any;
@@ -561,6 +700,17 @@ async function callGenerateContentStreamWithAbort(
     stream = await Promise.race([streamPromise, timeoutPromise]);
   } catch (initErr: any) {
     clearTimeout(timeoutTimer);
+    if (sig) sig.removeEventListener("abort", onSigAbort);
+    const status = initErr?.status || initErr?.error?.code;
+    const is503 = status === 503 || String(initErr?.message || "").includes("503");
+    if (timedOut || initErr?.name === "TimeoutError") {
+      const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
+      err.name = "TimeoutError";
+      throw err;
+    }
+    if (is503) {
+      throw initErr;
+    }
     if (sig?.aborted || initErr?.name === "AbortError") {
       const err: any = new Error("Request aborted");
       err.name = "AbortError";
@@ -579,6 +729,7 @@ async function callGenerateContentStreamWithAbort(
 
   if (!iterator) {
     clearTimeout(timeoutTimer);
+    if (sig) sig.removeEventListener("abort", onSigAbort);
     return {
       response: null,
       receivedAnyChunk: false,
@@ -586,31 +737,23 @@ async function callGenerateContentStreamWithAbort(
     };
   }
 
-  let abortHandler: (() => void) | undefined;
-  if (sig) {
-    abortHandler = () => {
-      try {
-        if (typeof iterator?.return === "function") {
-          iterator.return();
-        } else if (typeof stream?.return === "function") {
-          stream.return();
-        }
-      } catch {}
-    };
-    if (sig.aborted) {
-      abortHandler();
-    } else {
-      sig.addEventListener("abort", abortHandler, { once: true });
-    }
-  }
+  const abortIterator = () => {
+    try {
+      if (typeof iterator?.return === "function") {
+        iterator.return();
+      } else if (typeof stream?.return === "function") {
+        stream.return();
+      }
+    } catch {}
+  };
+  attemptController.signal.addEventListener("abort", abortIterator, { once: true });
 
   try {
-    // 1. Apply 30s timeout strictly as Time-to-First-Token (TTFT)
+    // 1. TTFT timeout: wait for first token
     let firstItem: IteratorResult<any>;
     try {
       firstItem = await Promise.race([iterator.next(), timeoutPromise]);
     } finally {
-      // Clear TTFT timeout as soon as the first chunk arrives or stream ends
       clearTimeout(timeoutTimer);
     }
 
@@ -662,7 +805,7 @@ async function callGenerateContentStreamWithAbort(
 
       // 2. Consume subsequent chunks while actively arriving without TTFT timeout aborting
       while (true) {
-        if (sig?.aborted) {
+        if (sig?.aborted || attemptController.signal.aborted) {
           const err: any = new Error("Request aborted");
           err.name = "AbortError";
           throw err;
@@ -676,7 +819,16 @@ async function callGenerateContentStreamWithAbort(
       }
     }
   } catch (iterErr: any) {
-    clearTimeout(timeoutTimer);
+    const status = iterErr?.status || iterErr?.error?.code;
+    const is503 = status === 503 || String(iterErr?.message || "").includes("503");
+    if (timedOut || iterErr?.name === "TimeoutError") {
+      const err: any = new Error(`Stream request timed out waiting for first token (TTFT > ${timeoutMs}ms)`);
+      err.name = "TimeoutError";
+      throw err;
+    }
+    if (is503) {
+      throw iterErr;
+    }
     if (sig?.aborted || iterErr?.name === "AbortError") {
       const err: any = new Error("Request aborted");
       err.name = "AbortError";
@@ -689,8 +841,8 @@ async function callGenerateContentStreamWithAbort(
     };
   } finally {
     clearTimeout(timeoutTimer);
-    if (sig && abortHandler) {
-      sig.removeEventListener("abort", abortHandler);
+    if (sig) {
+      sig.removeEventListener("abort", onSigAbort);
     }
   }
 
@@ -1227,12 +1379,7 @@ async function askGeminiInternal(
     const keyPool = availableKeys.length > 0 ? availableKeys : rawKeyPool;
     let currentKeyIdx = globalKeyRoundRobin++;
 
-    const getAiClient = (key: string) =>
-      new GoogleGenAI({
-        apiKey: key,
-        // @ts-ignore
-        httpOptions: agent ? { agent } : undefined,
-      });
+    const getAiClient = (key: string) => aiClientFactory(key);
 
     const activePower = getActivePowerLevel();
     const thinkingBudget = getThinkingBudget(activePower);
@@ -1248,9 +1395,21 @@ async function askGeminiInternal(
         .join("")
         .trim();
 
+    const messageStartTime = Date.now();
+
     for (const m of modelCandidates) {
       if (modelSucceeded) break;
       if (signal?.aborted) return STOPPED_RESULT;
+
+      const elapsed = Date.now() - messageStartTime;
+      const remainingBudget = GEMINI_MESSAGE_BUDGET_MS - elapsed;
+      if (remainingBudget <= 0) {
+        console.warn(
+          `[GEMINI BUDGET] Message total budget (${GEMINI_MESSAGE_BUDGET_MS}ms) exceeded (${elapsed}ms elapsed). Aborting candidate search.`
+        );
+        return BUDGET_EXCEEDED_MESSAGE;
+      }
+
       if (keyPool.length === 0) {
         console.warn(`[GEMINI] No active API keys remaining in keyPool. Skipping candidate loop.`);
         break;
@@ -1266,6 +1425,14 @@ async function askGeminiInternal(
 
       while (call1Attempt < 3) {
         if (signal?.aborted) return STOPPED_RESULT;
+        const call1Elapsed = Date.now() - messageStartTime;
+        const call1Remaining = GEMINI_MESSAGE_BUDGET_MS - call1Elapsed;
+        if (call1Remaining <= 0) {
+          console.warn(`[GEMINI BUDGET] Message total budget exceeded during call 1.`);
+          return BUDGET_EXCEEDED_MESSAGE;
+        }
+        const call1Timeout = Math.max(1, Math.min(GEMINI_MODEL_TIMEOUT_MS, call1Remaining));
+
         call1Attempt++;
         const currentKey = keyPool[currentKeyIdx % keyPool.length] || apiKey;
         const currentAi = getAiClient(currentKey);
@@ -1289,29 +1456,25 @@ async function askGeminiInternal(
               currentAi,
               call1Params,
               signal,
-              30000,
+              call1Timeout,
               onChunk
             );
             if (streamRes.response) {
               call1Res = streamRes.response;
-            } else if (!streamRes.receivedAnyChunk) {
-              call1Res = await callGenerateContentWithAbort(
-                currentAi,
-                call1Params,
-                signal
-              );
             } else {
               call1Res = await callGenerateContentWithAbort(
                 currentAi,
                 call1Params,
-                signal
+                signal,
+                call1Timeout
               );
             }
           } else {
             call1Res = await callGenerateContentWithAbort(
               currentAi,
               call1Params,
-              signal
+              signal,
+              call1Timeout
             );
           }
           break; // Call 1 succeeded
@@ -1365,14 +1528,18 @@ async function askGeminiInternal(
             }
           }
 
-          // 2. Per-request timeout (30s): mark model in cooldown and switch candidate
+          // 2. Per-request timeout (8-10s): mark model in cooldown and switch candidate
           const isTimeout =
             err?.name === "TimeoutError" ||
             status === 504 ||
             String(err?.message || "").includes("timed out");
           if (isTimeout) {
-            console.warn(`[GEMINI TIMEOUT] Model ${m} call 1 timed out after 30s. Entering cooldown and switching candidate...`);
-            markModelCooldown(m, 300000);
+            markModelCooldown(m);
+            const cd = modelCooldowns.get(m);
+            const cdSec = cd ? Math.round(cd.durationMs / 1000) : 300;
+            console.warn(
+              `[GEMINI TIMEOUT] Model ${m} call 1 timed out after ${GEMINI_MODEL_TIMEOUT_MS}ms. Entering ${cdSec}s cooldown and switching candidate...`
+            );
             break;
           }
 
@@ -1433,20 +1600,33 @@ async function askGeminiInternal(
             }
           }
 
-          // Server errors (503, 500): max 1 retry with jittered backoff (800ms-1500ms), then dynamic cooldown (25s for 503)
-          if (status === 503 || status === 500) {
+          // Server error 503 (Service Unavailable): switch immediately without retry, enter exponential cooldown
+          if (status === 503) {
+            markModelCooldown(m);
+            const cd = modelCooldowns.get(m);
+            const cdSec = cd ? Math.round(cd.durationMs / 1000) : 300;
+            console.warn(
+              `[GEMINI 503] Model ${m} call 1 returned 503. Entering ${cdSec}s cooldown and switching candidate immediately...`
+            );
+            break;
+          }
+
+          // Server error 500: max 1 retry with jittered backoff (800ms-1500ms)
+          if (status === 500) {
             if (call1Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
               const totalDelay = Math.floor(800 + Math.random() * 700);
-              console.warn(`[GEMINI RETRY] Model ${m} call 1 failed with status ${status} (attempt ${call1Attempt}/2). Retrying in ${totalDelay}ms...`);
+              console.warn(
+                `[GEMINI RETRY] Model ${m} call 1 failed with status 500 (attempt ${call1Attempt}/2). Retrying in ${totalDelay}ms...`
+              );
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              const cooldownMs = status === 503 ? 25000 : 300000;
-              const cooldownSec = Math.round(cooldownMs / 1000);
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 1 failed after 1 retry (${status}). Entering ${cooldownSec}s cooldown and switching candidate...`);
-              markModelCooldown(m, cooldownMs);
+              markModelCooldown(m);
+              console.warn(
+                `[GEMINI FALLBACK] Model ${m} call 1 failed after 1 retry (500). Entering cooldown and switching candidate...`
+              );
               break;
             }
           }
@@ -1489,6 +1669,7 @@ async function askGeminiInternal(
         if (signal?.aborted) return STOPPED_RESULT;
         response = call1Res;
         modelSucceeded = true;
+        resetModelCooldown(m);
         break;
       }
 
@@ -1645,6 +1826,14 @@ async function askGeminiInternal(
 
       while (call2Attempt < 3) {
         if (signal?.aborted) return STOPPED_RESULT;
+        const call2Elapsed = Date.now() - messageStartTime;
+        const call2Remaining = GEMINI_MESSAGE_BUDGET_MS - call2Elapsed;
+        if (call2Remaining <= 0) {
+          console.warn(`[GEMINI BUDGET] Message total budget exceeded before call 2.`);
+          return BUDGET_EXCEEDED_MESSAGE;
+        }
+        const call2Timeout = Math.max(1, Math.min(GEMINI_MODEL_TIMEOUT_MS, call2Remaining));
+
         call2Attempt++;
         const currentKey = keyPool[currentKeyIdx % keyPool.length] || apiKey;
         const currentAi = getAiClient(currentKey);
@@ -1661,29 +1850,25 @@ async function askGeminiInternal(
               currentAi,
               call2Params,
               signal,
-              30000,
+              call2Timeout,
               onChunk
             );
             if (streamRes.response) {
               call2Res = streamRes.response;
-            } else if (!streamRes.receivedAnyChunk) {
-              call2Res = await callGenerateContentWithAbort(
-                currentAi,
-                call2Params,
-                signal
-              );
             } else {
               call2Res = await callGenerateContentWithAbort(
                 currentAi,
                 call2Params,
-                signal
+                signal,
+                call2Timeout
               );
             }
           } else {
             call2Res = await callGenerateContentWithAbort(
               currentAi,
               call2Params,
-              signal
+              signal,
+              call2Timeout
             );
           }
           break; // Call 2 succeeded
@@ -1737,14 +1922,18 @@ async function askGeminiInternal(
             }
           }
 
-          // 2. Per-request timeout (30s)
+          // 2. Per-request timeout (8-10s)
           const isTimeout =
             err?.name === "TimeoutError" ||
             status === 504 ||
             String(err?.message || "").includes("timed out");
           if (isTimeout) {
-            console.warn(`[GEMINI TIMEOUT] Model ${m} call 2 timed out after 30s. Entering cooldown and switching candidate...`);
-            markModelCooldown(m, 300000);
+            markModelCooldown(m);
+            const cd = modelCooldowns.get(m);
+            const cdSec = cd ? Math.round(cd.durationMs / 1000) : 300;
+            console.warn(
+              `[GEMINI TIMEOUT] Model ${m} call 2 timed out after ${GEMINI_MODEL_TIMEOUT_MS}ms. Entering ${cdSec}s cooldown and switching candidate...`
+            );
             break;
           }
 
@@ -1809,20 +1998,33 @@ async function askGeminiInternal(
             }
           }
 
-          // Server errors (503, 500): max 1 retry with jittered backoff (800ms-1500ms), then dynamic cooldown (25s for 503)
-          if (status === 503 || status === 500) {
+          // Server error 503 (Service Unavailable): switch immediately without retry, enter exponential cooldown
+          if (status === 503) {
+            markModelCooldown(m);
+            const cd = modelCooldowns.get(m);
+            const cdSec = cd ? Math.round(cd.durationMs / 1000) : 300;
+            console.warn(
+              `[GEMINI 503] Model ${m} call 2 returned 503. Entering ${cdSec}s cooldown and switching candidate immediately...`
+            );
+            break;
+          }
+
+          // Server error 500: max 1 retry with jittered backoff (800ms-1500ms)
+          if (status === 500) {
             if (call2Attempt < 2) {
               if (signal?.aborted) return STOPPED_RESULT;
               const totalDelay = Math.floor(800 + Math.random() * 700);
-              console.warn(`[GEMINI RETRY] Model ${m} call 2 failed with status ${status} (attempt ${call2Attempt}/2). Retrying in ${totalDelay}ms...`);
+              console.warn(
+                `[GEMINI RETRY] Model ${m} call 2 failed with status 500 (attempt ${call2Attempt}/2). Retrying in ${totalDelay}ms...`
+              );
               await new Promise((r) => setTimeout(r, totalDelay));
               if (signal?.aborted) return STOPPED_RESULT;
               continue;
             } else {
-              const cooldownMs = status === 503 ? 25000 : 300000;
-              const cooldownSec = Math.round(cooldownMs / 1000);
-              console.warn(`[GEMINI FALLBACK] Model ${m} call 2 failed after 1 retry (${status}). Entering ${cooldownSec}s cooldown and switching candidate...`);
-              markModelCooldown(m, cooldownMs);
+              markModelCooldown(m);
+              console.warn(
+                `[GEMINI FALLBACK] Model ${m} call 2 failed after 1 retry (500). Entering cooldown and switching candidate...`
+              );
               break;
             }
           }
@@ -1873,7 +2075,7 @@ async function askGeminiInternal(
               ? 429
               : 0);
           if (status === 503) {
-            markModelCooldown(m, 25000);
+            markModelCooldown(m);
           } else if (status === 429) {
             markModelCooldown(m, 300000);
           }
@@ -1883,10 +2085,17 @@ async function askGeminiInternal(
 
       response = call2Res;
       modelSucceeded = true;
+      resetModelCooldown(m);
       break;
     }
 
     if (!response) {
+      if (Date.now() - messageStartTime >= GEMINI_MESSAGE_BUDGET_MS) {
+        console.warn(
+          `[GEMINI BUDGET] Message total budget (${GEMINI_MESSAGE_BUDGET_MS}ms) exhausted across all candidates.`
+        );
+        return BUDGET_EXCEEDED_MESSAGE;
+      }
       const cleanLastErr = sanitizeErrorMessage(lastErr?.status || lastErr?.message || "unknown");
       console.error(`[GEMINI ERROR] All model candidates failed. Last status: ${cleanLastErr}`);
       return "سرور هوش مصنوعی در حال حاضر شلوغ است، لطفاً یک دقیقه دیگر تلاش کنید ⏳";

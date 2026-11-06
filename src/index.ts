@@ -409,11 +409,15 @@ async function launchBotWithResilience() {
         setSetting("last_notified_changelog_version", LATEST_CHANGELOG.version);
       }
 
-      // Fallback: omit allowed_updates completely so grammY receives all default and extended update types natively from Telegram
+      // Pass official Telegram allowed_updates (filtering out internal synthetic types like guest_message)
+      // to ensure Telegram always delivers callback_query (inline buttons), messages, and admin updates.
+      const runnerAllowedUpdates = ALLOWED_UPDATES.filter(
+        (u) => typeof u === "string" && u !== "guest_message"
+      );
       activeRunner = run(bot, {
         runner: {
           fetch: {
-            ...(process.env.STRICT_ALLOWED_UPDATES === "true" ? { allowed_updates: ALLOWED_UPDATES } : {}),
+            allowed_updates: runnerAllowedUpdates,
           },
         },
       });

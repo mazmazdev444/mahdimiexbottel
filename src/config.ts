@@ -72,6 +72,8 @@ export const CONFIG = {
   GEMINI_API_KEY: initialSingleKey || (initialKeyPool[0] || ""),
   GEMINI_API_KEYS: initialKeyPool,
   AI_MODEL: process.env.AI_MODEL || "gemini-3.5-flash-lite",
+  GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_CALL_TIMEOUT_MS || process.env.GEMINI_TIMEOUT_MS || "10000", 10),
+  GEMINI_MESSAGE_BUDGET_MS: parseInt(process.env.GEMINI_MESSAGE_BUDGET_MS || "25000", 10),
   GEMINI_MODELS: (process.env.GEMINI_MODELS || "gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3.5-flash,gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash")
     .split(",")
     .map((s) => s.trim())
