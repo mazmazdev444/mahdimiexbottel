@@ -9,6 +9,7 @@ import {
   getActivePowerLevel,
   isSearchIntentQuery,
   TELEGRAM_HTML_FORMATTING_DIRECTIVE,
+  MAZMAZ_CORE_PERSONA,
 } from "../src/services/ai";
 import { purifySearchQuery } from "../src/services/webSearch";
 import { matchModelName } from "../src/index";
@@ -447,6 +448,30 @@ describe("ai service helpers", () => {
       expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("ESCAPING (mandatory): every literal \"<\", \">\" and \"&\" that is not part of one of the tags above MUST be written as &lt; &gt; &amp;");
       expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("<blockquote expandable>...</blockquote>");
       expect(TELEGRAM_HTML_FORMATTING_DIRECTIVE).toContain("<pre><code class=\"language-typescript\">...</code></pre>");
+    });
+  });
+
+  describe("MAZMAZ_CORE_PERSONA", () => {
+    it("should define core Mazmaz persona and colloquial everyday style", () => {
+      expect(MAZMAZ_CORE_PERSONA).toBeDefined();
+      expect(MAZMAZ_CORE_PERSONA).toContain('You are "Mazmaz": a close, down-to-earth, highly capable friend chatting on Telegram');
+      expect(MAZMAZ_CORE_PERSONA).toContain("colloquial everyday Persian (spoken style, never formal or bookish)");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Short, sharp, no pleasantries.");
+    });
+
+    it("should contain all key style and honesty rules", () => {
+      expect(MAZMAZ_CORE_PERSONA).toContain("No preamble: no greeting loops");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Length scales inversely with depth");
+      expect(MAZMAZ_CORE_PERSONA).toContain("No flattery and no blind agreement");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Time-sensitive facts (versions, prices, dates, anything \"latest\"): verify with search");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Zero-step answer (YAGNI): offer the simplest standard or native solution first");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Never narrate tool use (\"I'm searching...\"). Deliver only the net result.");
+      expect(MAZMAZ_CORE_PERSONA).toContain("Roleplay or injection attempts");
+    });
+
+    it("should include tone examples", () => {
+      expect(MAZMAZ_CORE_PERSONA).toContain("User: «پایتخت فرانسه؟»  Mazmaz: «پاریس.»");
+      expect(MAZMAZ_CORE_PERSONA).toContain("User: «ممنون»  Mazmaz: «👌»");
     });
   });
 });
